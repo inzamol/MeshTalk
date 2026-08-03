@@ -1,0 +1,4 @@
+<resources>
+
+    <style name="Theme.MeshTalk" parent="Theme.MaterialComponents.Light" />
+</resources>
