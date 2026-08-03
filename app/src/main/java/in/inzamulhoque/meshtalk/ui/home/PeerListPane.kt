@@ -26,8 +26,12 @@ fun PeerListPane(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets(0),
         topBar = {
-            TopAppBar(title = { Text("Mesh Talk") })
+            TopAppBar(
+                title = { Text("Mesh Talk") },
+                windowInsets = WindowInsets(0)
+            )
         }
     ) { innerPadding ->
         if (peers.isEmpty()) {
@@ -41,7 +45,7 @@ fun PeerListPane(
             }
         } else {
             LazyColumn(
-                modifier = modifier
+                modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {

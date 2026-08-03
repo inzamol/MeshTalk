@@ -3,6 +3,7 @@ package `in`.inzamulhoque.meshtalk
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -46,7 +47,9 @@ class MainActivity : ComponentActivity() {
                 val permissionState = rememberMultiplePermissionsState(permissions)
 
                 LaunchedEffect(permissionState.allPermissionsGranted) {
+                    Log.d("MainActivity", "Permissions granted: ${permissionState.allPermissionsGranted}")
                     if (permissionState.allPermissionsGranted) {
+                        Log.d("MainActivity", "Starting MeshNetworkManager")
                         meshNetworkManager.start()
                     }
                 }
@@ -54,7 +57,10 @@ class MainActivity : ComponentActivity() {
                 if (permissionState.allPermissionsGranted) {
                     MainScreen(myId = myId, app = app)
                 } else {
-                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        contentWindowInsets = WindowInsets(0)
+                    ) { innerPadding ->
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()

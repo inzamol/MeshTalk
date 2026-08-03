@@ -1,7 +1,10 @@
 package `in`.inzamulhoque.meshtalk.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.layout.AnimatedPane
 import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
 import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldRole
 import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
@@ -29,7 +32,8 @@ fun MainScreen(
     myId: String,
     app: MeshApplication
 ) {
-    val navigator = rememberListDetailPaneScaffoldNavigator<NavRoute>()
+    val scaffoldDirective = calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
+    val navigator = rememberListDetailPaneScaffoldNavigator<NavRoute>(scaffoldDirective)
     val backstack = rememberNavBackStack(NavRoute.Home)
     val coroutineScope = rememberCoroutineScope()
 
@@ -38,49 +42,55 @@ fun MainScreen(
         directive = navigator.scaffoldDirective,
         value = navigator.scaffoldValue,
         listPane = {
-            val homeViewModel: HomeViewModel = viewModel(
-                factory = object : ViewModelProvider.Factory {
-                    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                        return HomeViewModel(app.database.peerDao()) as T
-                    }
-                }
-            )
-            PeerListPane(
-                viewModel = homeViewModel,
-                onPeerClick = { peerId ->
-                    coroutineScope.launch {
-                        navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, NavRoute.Chat(peerId))
-                    }
-                }
-            )
-        },
-        detailPane = {
-            val currentRoute = navigator.currentDestination?.contentKey
-            if (currentRoute is NavRoute.Chat) {
-                val chatViewModel: ChatViewModel = viewModel(
-                    key = currentRoute.peerId,
+            AnimatedPane(modifier = Modifier.fillMaxSize()) {
+                val homeViewModel: HomeViewModel = viewModel(
                     factory = object : ViewModelProvider.Factory {
                         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                            return ChatViewModel(
-                                peerId = currentRoute.peerId,
-                                myId = myId,
-                                messageDao = app.database.messageDao(),
-                                peerDao = app.database.peerDao(),
-                                identityManager = app.identityManager
-                            ) as T
+                            return HomeViewModel(app.database.peerDao()) as T
                         }
                     }
                 )
-                ChatPane(
-                    viewModel = chatViewModel,
-                    myId = myId,
-                    onBack = {
+                PeerListPane(
+                    viewModel = homeViewModel,
+                    onPeerClick = { peerId ->
                         coroutineScope.launch {
-                            navigator.navigateBack()
+                            navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, NavRoute.Chat(peerId))
                         }
-                    },
-                    isTwoPane = navigator.scaffoldDirective.maxHorizontalPartitions > 1
+                    }
                 )
+            }
+        },
+        detailPane = {
+            AnimatedPane(modifier = Modifier.fillMaxSize()) {
+                val currentRoute = navigator.currentDestination?.contentKey
+                if (currentRoute is NavRoute.Chat) {
+                    val chatViewModel: ChatViewModel = viewModel(
+                        key = currentRoute.peerId,
+                        factory = object : ViewModelProvider.Factory {
+                            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                return ChatViewModel(
+                                    peerId = currentRoute.peerId,
+                                    myId = myId,
+                                    messageDao = app.database.messageDao(),
+                                    peerDao = app.database.peerDao(),
+                                    identityManager = app.identityManager
+                                ) as T
+                            }
+                        }
+                    )
+                    ChatPane(
+                        viewModel = chatViewModel,
+                        myId = myId,
+                        onBack = {
+                            coroutineScope.launch {
+                                navigator.navigateBack()
+                            }
+                        },
+                        isTwoPane = navigator.scaffoldDirective.maxHorizontalPartitions > 1
+                    )
+                } else {
+                    Box(modifier = Modifier.fillMaxSize())
+                }
             }
         }
     )

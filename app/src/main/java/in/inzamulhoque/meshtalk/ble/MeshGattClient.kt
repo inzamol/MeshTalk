@@ -79,14 +79,23 @@ class MeshGattClient(
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             try {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    Log.d("MeshGattClient", "Connected to ${device.address}")
-                    gatt?.discoverServices()
+                    Log.d("MeshGattClient", "Connected to ${device.address}. Requesting MTU...")
+                    gatt?.requestMtu(512)
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.d("MeshGattClient", "Disconnected from ${device.address}")
                     onSyncComplete()
                 }
             } catch (e: SecurityException) {
                 Log.e("MeshGattClient", "Permission denied in connection state change", e)
+            }
+        }
+
+        override fun onMtuChanged(gatt: BluetoothGatt?, mtu: Int, status: Int) {
+            Log.d("MeshGattClient", "MTU changed to $mtu, status: $status")
+            try {
+                gatt?.discoverServices()
+            } catch (e: SecurityException) {
+                Log.e("MeshGattClient", "Permission denied discovering services", e)
             }
         }
 
@@ -110,7 +119,8 @@ class MeshGattClient(
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 when (characteristic.uuid) {
                     MeshConstants.IDENTITY_CHAR_UUID -> {
-                        val peerId = String(characteristic.value ?: byteArrayOf())
+                        val value = characteristic.value ?: byteArrayOf()
+                        val peerId = String(value)
                         Log.d("MeshGattClient", "Discovered Peer ID: $peerId")
                         currentPeerId = peerId
                         val encryptionChar = gatt.getService(MeshConstants.SERVICE_UUID)
@@ -129,7 +139,8 @@ class MeshGattClient(
                         }
                     }
                     MeshConstants.ENCRYPTION_KEY_CHAR_UUID -> {
-                        val encryptionKey = String(characteristic.value ?: byteArrayOf())
+                        val value = characteristic.value ?: byteArrayOf()
+                        val encryptionKey = String(value)
                         val peerId = currentPeerId ?: return
                         scope.launch {
                             protocol.onPeerDiscovered(peerId, "", encryptionKey, device.address)
@@ -137,7 +148,8 @@ class MeshGattClient(
                         }
                     }
                     MeshConstants.INVENTORY_CHAR_UUID -> {
-                        val inventoryStr = String(characteristic.value ?: byteArrayOf())
+                        val value = characteristic.value ?: byteArrayOf()
+                        val inventoryStr = String(value)
                         val remoteInventory = if (inventoryStr.isEmpty()) emptyList() else inventoryStr.split(",").filter { it.isNotEmpty() }.map { it.toLong() }
                         Log.d("MeshGattClient", "Remote Inventory: $remoteInventory")
                         

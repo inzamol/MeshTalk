@@ -9,14 +9,19 @@ class MeshBLEManager(
     private val bluetoothAdapter: BluetoothAdapter,
     private val onPeerDiscovered: (String) -> Unit // deviceAddress
 ) {
-    private val advertiser: BluetoothLeAdvertiser? = bluetoothAdapter.bluetoothLeAdvertiser
-    private val scanner: BluetoothLeScanner? = bluetoothAdapter.bluetoothLeScanner
-
     private var isScanning = false
     private var isAdvertising = false
 
     fun startAdvertising() {
+        Log.d("MeshBLEManager", "Requesting to start advertising. isAdvertising: $isAdvertising")
         if (isAdvertising) return
+        
+        val advertiser = bluetoothAdapter.bluetoothLeAdvertiser
+        if (advertiser == null) {
+            Log.e("MeshBLEManager", "BluetoothLeAdvertiser is null!")
+            return
+        }
+
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setConnectable(true)
@@ -25,12 +30,12 @@ class MeshBLEManager(
             .build()
 
         val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(false)
+            .setIncludeDeviceName(true)
             .addServiceUuid(ParcelUuid(MeshConstants.SERVICE_UUID))
             .build()
 
         try {
-            advertiser?.startAdvertising(settings, data, advertiseCallback)
+            advertiser.startAdvertising(settings, data, advertiseCallback)
             isAdvertising = true
         } catch (e: SecurityException) {
             Log.e("MeshBLEManager", "Permission denied for advertising", e)
@@ -38,9 +43,10 @@ class MeshBLEManager(
     }
 
     fun stopAdvertising() {
+        Log.d("MeshBLEManager", "Stopping advertising")
         if (!isAdvertising) return
         try {
-            advertiser?.stopAdvertising(advertiseCallback)
+            bluetoothAdapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
             isAdvertising = false
         } catch (e: SecurityException) {
             Log.e("MeshBLEManager", "Permission denied for stopping advertising", e)
@@ -48,17 +54,28 @@ class MeshBLEManager(
     }
 
     fun startScanning() {
+        Log.d("MeshBLEManager", "Requesting to start scanning. isScanning: $isScanning")
         if (isScanning) return
+
+        val scanner = bluetoothAdapter.bluetoothLeScanner
+        if (scanner == null) {
+            Log.e("MeshBLEManager", "BluetoothLeScanner is null!")
+            return
+        }
+
         val filter = ScanFilter.Builder()
             .setServiceUuid(ParcelUuid(MeshConstants.SERVICE_UUID))
             .build()
 
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+            .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
             .build()
 
         try {
-            scanner?.startScan(listOf(filter), settings, scanCallback)
+            scanner.startScan(listOf(filter), settings, scanCallback)
             isScanning = true
         } catch (e: SecurityException) {
             Log.e("MeshBLEManager", "Permission denied for scanning", e)
@@ -66,9 +83,10 @@ class MeshBLEManager(
     }
 
     fun stopScanning() {
+        Log.d("MeshBLEManager", "Stopping scanning")
         if (!isScanning) return
         try {
-            scanner?.stopScan(scanCallback)
+            bluetoothAdapter.bluetoothLeScanner?.stopScan(scanCallback)
             isScanning = false
         } catch (e: SecurityException) {
             Log.e("MeshBLEManager", "Permission denied for stopping scanning", e)

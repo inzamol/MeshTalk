@@ -3,6 +3,7 @@ package `in`.inzamulhoque.meshtalk.ble
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.util.Log
 import `in`.inzamulhoque.meshtalk.crypto.IdentityManager
 import `in`.inzamulhoque.meshtalk.data.local.AppDatabase
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
@@ -42,7 +43,15 @@ class MeshNetworkManager(
     private val activeClients = mutableMapOf<String, MeshGattClient>()
 
     fun start() {
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) return
+        Log.d("MeshNetworkManager", "Starting MeshNetworkManager")
+        if (bluetoothAdapter == null) {
+            Log.e("MeshNetworkManager", "BluetoothAdapter is null!")
+            return
+        }
+        if (!bluetoothAdapter.isEnabled) {
+            Log.w("MeshNetworkManager", "Bluetooth is disabled!")
+            return
+        }
 
         bleManager?.startAdvertising()
         bleManager?.startScanning()
@@ -50,6 +59,7 @@ class MeshNetworkManager(
     }
 
     fun stop() {
+        Log.d("MeshNetworkManager", "Stopping MeshNetworkManager")
         bleManager?.stopAdvertising()
         bleManager?.stopScanning()
         gattServer.stop()

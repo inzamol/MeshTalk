@@ -29,9 +29,12 @@ fun ChatPane(
     var text by remember { mutableStateOf("") }
 
     Scaffold(
+        modifier = modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar(
                 title = { Text(peer?.displayName ?: "Chat") },
+                windowInsets = WindowInsets(0),
                 navigationIcon = {
                     if (!isTwoPane) {
                         IconButton(onClick = onBack) {
@@ -42,39 +45,35 @@ fun ChatPane(
             )
         },
         bottomBar = {
-            BottomAppBar {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("Type a message...") },
-                        shape = RoundedCornerShape(24.dp),
-                        colors = TextFieldDefaults.colors(
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
-                        )
+            BottomAppBar(
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                windowInsets = WindowInsets(0)
+            ) {
+                TextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Type a message...") },
+                    shape = RoundedCornerShape(24.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(onClick = {
-                        if (text.isNotBlank()) {
-                            viewModel.sendMessage(text)
-                            text = ""
-                        }
-                    }) {
-                        Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Send")
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(onClick = {
+                    if (text.isNotBlank()) {
+                        viewModel.sendMessage(text)
+                        text = ""
                     }
+                }) {
+                    Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Send")
                 }
             }
         }
     ) { innerPadding ->
         LazyColumn(
-            modifier = modifier
+            modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
             reverseLayout = false,
