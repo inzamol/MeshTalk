@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="411dp"
+    android:height="891dp"
+    android:viewportWidth="411"
+    android:viewportHeight="891">
+
+    <!-- Deep Gradient Background -->
+    <path android:pathData="M0,0h411v891h-411z">
+        <aapt:attr name="android:fillColor">
+            <linearGradient
+                android:endX="205"
+                android:endY="891"
+                android:startX="205"
+                android:startY="0"
+                android:type="linear">
+                <item android:color="#2D1B69" android:offset="0" />
+                <item android:color="#1A0B2E" android:offset="1" />
+            </linearGradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Mesh Nodes & Links -->
+    <!-- Large Background Nodes (Low Opacity) -->
+    <path
+        android:fillColor="#0DFFFFFF"
+        android:pathData="M350,150m-60,0a60,60 0,1 1,120,0a60,60 0,1 1,-120,0" />
+    <path
+        android:fillColor="#0DFFFFFF"
+        android:pathData="M50,700m-80,0a80,80 0,1 1,160,0a80,80 0,1 1,-160,0" />
+
+    <!-- Logo in Center -->
+    <!-- I can't easily reference another drawable in a path, so I'll recreate a simplified version -->
+    <path
+        android:strokeColor="#D0BCFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M155,445 L205,475 L255,445 M155,525 L205,495 L255,525 M155,445 L155,525 M255,445 L255,525 M205,475 L205,495" />
+
+    <path
+        android:fillColor="#D0BCFF"
+        android:pathData="M205,485m-10,0a10,10 0,1 1,20,0a10,10 0,1 1,-20,0" />
+
+</vector>

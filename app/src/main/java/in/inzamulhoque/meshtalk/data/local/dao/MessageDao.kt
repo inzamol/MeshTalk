@@ -10,7 +10,7 @@ interface MessageDao {
     fun getMessagesForPeer(peerId: String): Flow<List<Message>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertMessage(message: Message)
+    suspend fun insertMessage(message: Message): Long
 
     @Delete
     suspend fun deleteMessage(message: Message)
@@ -30,6 +30,18 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE uuid = :uuid LIMIT 1")
     suspend fun getMessageByUuid(uuid: String): Message?
 
-    @Query("SELECT id FROM messages")
-    suspend fun getAllMessageIds(): List<Long>
+    @Query("UPDATE messages SET status = :failedStatus WHERE status = :pendingStatus AND timestamp < :threshold")
+    suspend fun markStaleMessagesAsFailed(threshold: Long, pendingStatus: String, failedStatus: String)
+
+    @Query("SELECT * FROM messages WHERE status = :pendingStatus")
+    suspend fun getPendingMessages(pendingStatus: String): List<Message>
+
+    @Query("DELETE FROM messages WHERE senderId = :peerId OR receiverId = :peerId")
+    suspend fun deleteMessagesForPeer(peerId: String)
+
+    @Query("DELETE FROM messages")
+    suspend fun deleteAllMessages()
+
+    @Query("UPDATE messages SET status = 'FAILED' WHERE status = 'PENDING' AND timestamp < :timeoutLimit")
+    suspend fun markTimedOutMessagesAsFailed(timeoutLimit: Long)
 }

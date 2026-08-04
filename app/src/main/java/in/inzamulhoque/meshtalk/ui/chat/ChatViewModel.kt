@@ -32,6 +32,22 @@ class ChatViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val messages: StateFlow<List<Message>> = messageDao.getMessagesForPeer(peerId)
+        .onEach { list ->
+            // Mark unread incoming messages as READ
+            val unread = list.filter { it.receiverId == myId && it.status != MessageStatus.READ }
+            if (unread.isNotEmpty()) {
+                unread.forEach { msg ->
+                    messageDao.updateMessageStatus(msg.id, MessageStatus.READ.name)
+                    meshNetworkManager.broadcastSyncUpdate(
+                        `in`.inzamulhoque.meshtalk.protocol.SyncUpdate(
+                            type = `in`.inzamulhoque.meshtalk.protocol.SyncUpdateType.READ,
+                            targetUuid = msg.uuid,
+                            senderId = myId
+                        )
+                    )
+                }
+            }
+        }
         .map { list ->
             list.map { msg ->
                 if (msg.senderId == myId && msg.localPlaintext != null) {
@@ -73,9 +89,48 @@ class ChatViewModel(
                 content = finalContent,
                 localPlaintext = content, // Store the original text locally
                 isEncrypted = encryptionKey != null,
-                status = MessageStatus.SENT
+                status = MessageStatus.PENDING // Start as PENDING
             )
-            messageDao.insertMessage(message)
+            val msgId = messageDao.insertMessage(message)
+            val savedMsg = message.copy(id = msgId)
+            
+            meshNetworkManager.broadcastMessage(savedMsg)
+        }
+    }
+
+    fun retryMessage(message: Message) {
+        viewModelScope.launch {
+            val updatedMessage = message.copy(
+                timestamp = System.currentTimeMillis(),
+                status = MessageStatus.PENDING
+            )
+            messageDao.insertMessage(updatedMessage)
+            meshNetworkManager.broadcastMessage(updatedMessage)
+        }
+    }
+
+    fun deleteMessage(message: Message) {
+        viewModelScope.launch {
+            messageDao.deleteMessage(message)
+            if (message.senderId == myId) {
+                meshNetworkManager.broadcastSyncUpdate(
+                    `in`.inzamulhoque.meshtalk.protocol.SyncUpdate(
+                        type = `in`.inzamulhoque.meshtalk.protocol.SyncUpdateType.DELETE_MESSAGE,
+                        targetUuid = message.uuid,
+                        senderId = myId
+                    )
+                )
+            }
+        }
+    }
+
+    fun deleteChat() {
+        viewModelScope.launch {
+            messageDao.deleteMessagesForPeer(peerId)
+            val p = peerDao.getPeerById(peerId)
+            if (p != null) {
+                peerDao.deletePeer(p)
+            }
         }
     }
 }

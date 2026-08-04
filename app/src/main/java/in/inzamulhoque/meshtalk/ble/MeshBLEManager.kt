@@ -1,21 +1,34 @@
 package `in`.inzamulhoque.meshtalk.ble
 
+import android.annotation.SuppressLint
+import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.le.*
+import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
+import `in`.inzamulhoque.meshtalk.util.PermissionUtils
 
 class MeshBLEManager(
+    private val context: Context,
     private val bluetoothAdapter: BluetoothAdapter,
-    private val onPeerDiscovered: (String) -> Unit // deviceAddress
+    private val myShortId: ByteArray,
+    private val onPeerDiscovered: (String, ByteArray) -> Unit, // deviceAddress, peerShortId
 ) {
     private var isScanning = false
     private var isAdvertising = false
 
+    @SuppressLint("MissingPermission")
     fun startAdvertising() {
         Log.d("MeshBLEManager", "Requesting to start advertising. isAdvertising: $isAdvertising")
         if (isAdvertising) return
         
+        // Permission check
+        if (!PermissionUtils.hasPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE)) {
+            Log.e("MeshBLEManager", "Missing BLUETOOTH_ADVERTISE permission")
+            return
+        }
+
         val advertiser = bluetoothAdapter.bluetoothLeAdvertiser
         if (advertiser == null) {
             Log.e("MeshBLEManager", "BluetoothLeAdvertiser is null!")
@@ -30,12 +43,13 @@ class MeshBLEManager(
             .build()
 
         val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(false) // Keep main packet small for 128-bit UUID
+            .setIncludeDeviceName(false)
             .addServiceUuid(ParcelUuid(MeshConstants.SERVICE_UUID))
             .build()
 
         val scanResponse = AdvertiseData.Builder()
-            .setIncludeDeviceName(true)
+            .setIncludeDeviceName(false)
+            .addServiceData(ParcelUuid(MeshConstants.SERVICE_UUID), myShortId)
             .build()
 
         try {
@@ -57,9 +71,16 @@ class MeshBLEManager(
         }
     }
 
+    @SuppressLint("MissingPermission")
     fun startScanning() {
         Log.d("MeshBLEManager", "Requesting to start scanning. isScanning: $isScanning")
         if (isScanning) return
+
+        // Permission check
+        if (!PermissionUtils.hasPermission(context, Manifest.permission.BLUETOOTH_SCAN)) {
+            Log.e("MeshBLEManager", "Missing BLUETOOTH_SCAN permission")
+            return
+        }
 
         val scanner = bluetoothAdapter.bluetoothLeScanner
         if (scanner == null) {
@@ -108,11 +129,13 @@ class MeshBLEManager(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val scanRecord = result.scanRecord ?: return
-            val uuids = scanRecord.serviceUuids ?: return
+            val serviceUuid = ParcelUuid(MeshConstants.SERVICE_UUID)
+            val uuids = scanRecord.serviceUuids ?: emptyList()
             
-            if (uuids.contains(ParcelUuid(MeshConstants.SERVICE_UUID))) {
-                Log.d("MeshBLEManager", "Mesh peer discovered: ${result.device.address}")
-                onPeerDiscovered(result.device.address)
+            if (uuids.contains(serviceUuid)) {
+                val shortId = scanRecord.serviceData[serviceUuid] ?: byteArrayOf()
+                Log.d("MeshBLEManager", "Mesh peer seen: ${result.device.address}")
+                onPeerDiscovered(result.device.address, shortId)
             }
         }
 

@@ -9,11 +9,17 @@ interface PeerDao {
     @Query("SELECT * FROM peers ORDER BY lastSeen DESC")
     fun getAllPeers(): Flow<List<Peer>>
 
+    @Query("SELECT * FROM peers")
+    suspend fun getAllPeersSync(): List<Peer>
+
     @Query("SELECT * FROM peers WHERE id = :peerId")
     fun getPeerFlowById(peerId: String): Flow<Peer?>
 
     @Query("SELECT * FROM peers WHERE id = :peerId")
     suspend fun getPeerById(peerId: String): Peer?
+
+    @Query("SELECT * FROM peers WHERE deviceAddress = :address LIMIT 1")
+    suspend fun getPeerByAddress(address: String): Peer?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPeer(peer: Peer)
@@ -23,4 +29,7 @@ interface PeerDao {
 
     @Delete
     suspend fun deletePeer(peer: Peer)
+
+    @Query("DELETE FROM peers")
+    suspend fun deleteAllPeers()
 }
