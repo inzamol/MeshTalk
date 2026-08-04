@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -12,6 +14,24 @@ android {
         version = release(37)
     }
 
+    val signingProps = Properties()
+    val propsFile = rootProject.file("signing.properties")
+    if (propsFile.exists()) {
+        signingProps.load(propsFile.inputStream())
+    }
+
+    signingConfigs {
+        create("release") {
+            val fileProp = signingProps.getProperty("STORE_FILE")
+            if (fileProp != null) {
+                storeFile = file(fileProp)
+            }
+            storePassword = signingProps.getProperty("STORE_PASSWORD")
+            keyAlias = signingProps.getProperty("KEY_ALIAS")
+            keyPassword = signingProps.getProperty("KEY_PASSWORD")
+        }
+    }
+
     defaultConfig {
         applicationId = "in.inzamulhoque.meshtalk"
         minSdk = 31
@@ -24,6 +44,13 @@ android {
 
     buildTypes {
         release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             optimization {
                 enable = false
             }
@@ -68,6 +95,9 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.tink.android)
     implementation(libs.androidx.security.crypto)
+    implementation(libs.zxing.android.embedded)
+    implementation(libs.zxing.core)
+    implementation(libs.google.mlkit.barcode.scanning)
     implementation(libs.coil.compose)
     implementation(libs.converter.moshi)
     implementation(libs.kotlinx.coroutines.android)

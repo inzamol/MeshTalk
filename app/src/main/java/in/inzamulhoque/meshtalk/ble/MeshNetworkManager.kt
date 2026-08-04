@@ -29,6 +29,7 @@ class MeshNetworkManager(
         myId = identityManager.getMyId(),
         messageDao = database.messageDao(),
         peerDao = database.peerDao(),
+        groupDao = database.groupDao(),
         identityManager = identityManager,
         settingsManager = (context.applicationContext as `in`.inzamulhoque.meshtalk.MeshApplication).settingsManager
     )
@@ -36,8 +37,8 @@ class MeshNetworkManager(
     private val myShortId = String.format("%08x", identityManager.getMyId().hashCode()).toByteArray()
 
     private val bleManager = bluetoothAdapter?.let { adapter ->
-        MeshBLEManager(context, adapter, myShortId) { deviceAddress, peerShortId ->
-            onPeerSeen(deviceAddress, peerShortId)
+        MeshBLEManager(context, adapter, myShortId) { deviceAddress, peerShortId, rssi ->
+            onPeerSeen(deviceAddress, peerShortId, rssi)
         }
     }
 
@@ -68,10 +69,25 @@ class MeshNetworkManager(
         
         if (bluetoothAdapter?.isEnabled == true) {
             bleManager?.startAdvertising()
-            bleManager?.startScanning()
+            val settings = (context.applicationContext as `in`.inzamulhoque.meshtalk.MeshApplication).settingsManager
+            if (settings.isContinuousSearchEnabled) {
+                bleManager?.startScanning()
+            }
             gattServer.start()
             startAutoReconnectLoop()
             startTimeoutCheckLoop()
+        }
+    }
+
+    fun refreshSearch() {
+        scope.launch {
+            Log.d("MeshNetworkManager", "Manual search refresh triggered")
+            bleManager?.startScanning()
+            delay(10000) // Scan for 10 seconds
+            val settings = (context.applicationContext as `in`.inzamulhoque.meshtalk.MeshApplication).settingsManager
+            if (!settings.isContinuousSearchEnabled) {
+                bleManager?.stopScanning()
+            }
         }
     }
 
@@ -123,7 +139,7 @@ class MeshNetworkManager(
         }
     }
 
-    private fun onPeerSeen(deviceAddress: String, peerShortId: ByteArray) {
+    private fun onPeerSeen(deviceAddress: String, peerShortId: ByteArray, rssi: Int) {
         if (peerShortId.contentEquals(myShortId)) return
         
         scope.launch {
@@ -131,9 +147,9 @@ class MeshNetworkManager(
             val now = System.currentTimeMillis()
 
             if (existing == null) {
-                protocol.onPeerDiscovered(deviceAddress, "", null, "Connecting...", deviceAddress)
-            } else if (now - existing.lastSeen > 10000) {
-                database.peerDao().updatePeer(existing.copy(lastSeen = now))
+                protocol.onPeerDiscovered(deviceAddress, "", null, "Connecting...", deviceAddress, rssi = rssi)
+            } else if (now - existing.lastSeen > 10000 || Math.abs(existing.rssi - rssi) > 5) {
+                database.peerDao().updatePeer(existing.copy(lastSeen = now, rssi = rssi))
             }
             
             val myIdHash = java.lang.Long.parseLong(String(myShortId), 16)
@@ -160,7 +176,7 @@ class MeshNetworkManager(
             connectionCooldowns[deviceAddress] = now
             
             Log.d("MeshNetworkManager", "Initiating GATT client connection to $deviceAddress")
-            val client = MeshGattClient(context, device, protocol, identityManager.getMyEncryptionKey(), identityManager.getDisplayName()) {
+            val client = MeshGattClient(context, device, protocol, identityManager.getMyEncryptionKey(), identityManager.getDisplayName(), { this }) {
                 synchronized(activeClients) {
                     activeClients.remove(deviceAddress)
                 }
@@ -192,6 +208,18 @@ class MeshNetworkManager(
         scope.launch {
             activeClients.values.forEach { it.sendData(json) }
             gattServer.broadcastData(json)
+        }
+    }
+
+    fun forwardToOthers(message: Message, excludeAddress: String?) {
+        val json = protocol.serializeMessage(message)
+        scope.launch {
+            activeClients.forEach { (address, client) ->
+                if (address != excludeAddress) {
+                    client.sendData(json)
+                }
+            }
+            gattServer.broadcastData(json, excludeAddress)
         }
     }
 }

@@ -10,8 +10,11 @@ import kotlinx.coroutines.launch
 
 class SettingsViewModel(
     private val database: AppDatabase,
-    private val settingsManager: SettingsManager
+    private val settingsManager: SettingsManager,
+    private val identityManager: `in`.inzamulhoque.meshtalk.crypto.IdentityManager
 ) : ViewModel() {
+
+    val myId = identityManager.getMyId()
 
     private val _displayName = MutableStateFlow(settingsManager.displayName ?: "")
     val displayName = _displayName.asStateFlow()
@@ -25,9 +28,28 @@ class SettingsViewModel(
     private val _connectionToastEnabled = MutableStateFlow(settingsManager.isConnectionToastEnabled)
     val connectionToastEnabled = _connectionToastEnabled.asStateFlow()
 
+    private val _continuousSearchEnabled = MutableStateFlow(settingsManager.isContinuousSearchEnabled)
+    val continuousSearchEnabled = _continuousSearchEnabled.asStateFlow()
+
+    private val _bio = MutableStateFlow(settingsManager.bio ?: "")
+    val bio = _bio.asStateFlow()
+
+    private val _avatarBase64 = MutableStateFlow(settingsManager.avatarBase64)
+    val avatarBase64 = _avatarBase64.asStateFlow()
+
     fun updateDisplayName(name: String) {
         settingsManager.displayName = name
         _displayName.value = name
+    }
+
+    fun updateBio(bio: String) {
+        settingsManager.bio = bio
+        _bio.value = bio
+    }
+
+    fun updateAvatar(base64: String?) {
+        settingsManager.avatarBase64 = base64
+        _avatarBase64.value = base64
     }
 
     fun setNotificationsEnabled(enabled: Boolean) {
@@ -45,6 +67,11 @@ class SettingsViewModel(
         _connectionToastEnabled.value = enabled
     }
 
+    fun setContinuousSearchEnabled(enabled: Boolean) {
+        settingsManager.isContinuousSearchEnabled = enabled
+        _continuousSearchEnabled.value = enabled
+    }
+
     fun deleteAllMessages() {
         viewModelScope.launch {
             database.messageDao().deleteAllMessages()
@@ -54,6 +81,15 @@ class SettingsViewModel(
     fun deleteAllPeers() {
         viewModelScope.launch {
             database.peerDao().deleteAllPeers()
+        }
+    }
+
+    fun verifyPeer(peerId: String) {
+        viewModelScope.launch {
+            val peer = database.peerDao().getPeerById(peerId)
+            if (peer != null) {
+                database.peerDao().updatePeer(peer.copy(isVerified = true))
+            }
         }
     }
 }

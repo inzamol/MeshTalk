@@ -17,6 +17,7 @@ class MeshGattClient(
     private val protocol: MeshProtocol,
     private val myEncryptionKey: String,
     private val myDisplayName: String,
+    private val networkManagerProvider: () -> MeshNetworkManager?,
     private val onSyncComplete: () -> Unit
 ) {
     private var gatt: BluetoothGatt? = null
@@ -280,16 +281,22 @@ class MeshGattClient(
                             val handshake = protocol.deserializeHandshake(json)
                             if (handshake != null) {
                                 scope.launch {
-                                    protocol.handleHandshake(handshake, device.address)
+                                    val messagesToSync = protocol.handleHandshake(handshake, device.address)
+                                    messagesToSync.forEach { msg ->
+                                        sendData(protocol.serializeMessage(msg))
+                                    }
                                     cancelConnectionTimeout() // Handshake complete, stop connection timer
                                 }
                             } else {
                                 scope.launch {
                                     val message = protocol.deserializeMessage(json)
                                     if (message != null) {
-                                        val reply = protocol.processReceivedMessage(message)
+                                        val (reply, forward) = protocol.processReceivedMessage(message)
                                         if (reply != null) {
                                             sendData(protocol.serializeSyncUpdate(reply))
+                                        }
+                                        if (forward != null) {
+                                            networkManagerProvider()?.forwardToOthers(forward, device.address)
                                         }
                                         return@launch
                                     }

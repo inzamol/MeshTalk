@@ -21,6 +21,12 @@ import `in`.inzamulhoque.meshtalk.data.local.entity.MessageStatus
 import java.text.SimpleDateFormat
 import java.util.*
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import coil.compose.AsyncImage
+import android.util.Base64
+import `in`.inzamulhoque.meshtalk.data.local.entity.MessageType
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatPane(
@@ -36,11 +42,24 @@ fun ChatPane(
     var showMenu by remember { mutableStateOf(false) }
     var messageToDelete by remember { mutableStateOf<Message?>(null) }
 
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.sendImage(it) }
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize().imePadding(),
         topBar = {
             TopAppBar(
-                title = { Text(peer?.displayName ?: "Chat") },
+                title = { 
+                    Column {
+                        Text(peer?.displayName ?: "Chat")
+                        if (peer?.id?.contains("-") == true) { // Basic heuristic for group ID
+                             Text("Group Chat", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                },
                 navigationIcon = {
                     if (!isTwoPane) {
                         IconButton(onClick = onBack) {
@@ -73,6 +92,9 @@ fun ChatPane(
             BottomAppBar(
                 contentPadding = PaddingValues(horizontal = 8.dp)
             ) {
+                IconButton(onClick = { imagePicker.launch("image/*") }) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Attach")
+                }
                 TextField(
                     value = text,
                     onValueChange = { text = it },
@@ -161,6 +183,7 @@ fun MessageBubble(
             shape = shape,
             modifier = Modifier
                 .padding(vertical = 4.dp, horizontal = 8.dp)
+                .widthIn(max = 300.dp)
                 .combinedClickable(
                     onClick = {
                         if (message.status == MessageStatus.FAILED) {
@@ -171,10 +194,31 @@ fun MessageBubble(
                 )
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
-                Text(
-                    text = message.content,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                if (message.type == MessageType.IMAGE) {
+                    val imageData = if (isMine && message.mediaUri != null) {
+                        message.mediaUri
+                    } else {
+                        try {
+                            Base64.decode(message.content, Base64.DEFAULT)
+                        } catch (e: Exception) { null }
+                    }
+                    
+                    AsyncImage(
+                        model = imageData,
+                        contentDescription = "Image",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .padding(bottom = 4.dp),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                } else {
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                
                 Row(
                     modifier = Modifier.align(Alignment.End),
                     verticalAlignment = Alignment.CenterVertically

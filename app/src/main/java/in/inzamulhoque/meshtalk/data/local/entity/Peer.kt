@@ -11,5 +11,9 @@ data class Peer(
     val displayName: String?,
     val deviceAddress: String?, // BLE MAC address
     val lastSeen: Long = System.currentTimeMillis(),
-    val lastSyncTimestamp: Long = 0
+    val lastSyncTimestamp: Long = 0,
+    val avatarUri: String? = null,
+    val bio: String? = null,
+    val rssi: Int = -100,
+    val isVerified: Boolean = false
 )

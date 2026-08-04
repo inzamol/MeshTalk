@@ -73,9 +73,11 @@ class MeshGattServer(
         } catch (_: SecurityException) {}
     }
 
-    fun broadcastData(json: String) {
+    fun broadcastData(json: String, excludeAddress: String? = null) {
         connectedDevices.forEach { device ->
-            sendDataViaNotification(device, json)
+            if (device.address != excludeAddress) {
+                sendDataViaNotification(device, json)
+            }
         }
     }
 
@@ -166,10 +168,10 @@ class MeshGattServer(
                                 sendDataViaNotification(dev, protocol.serializeHandshake(protocol.createHandshake(myEncryptionKey, displayNameProvider())))
                                 protocol.getMessagesToSync(handshake.inventory).forEach { sendDataViaNotification(dev, protocol.serializeMessage(it)) }
                             }
-                        } else processReceivedJson(json)
+                        } else processReceivedJson(json, dev)
                         reassemblyBuffers.remove(bufferKey)
                     }
-                } else processReceivedJson(String(data))
+                } else processReceivedJson(String(data), dev)
                 if (responseNeeded) gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, data)
             } else if (responseNeeded) gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
         }
@@ -182,12 +184,15 @@ class MeshGattServer(
 
         private fun totalChunksFromData(data: ByteArray): Int = data[3].toInt() and 0xFF
 
-        private fun processReceivedJson(json: String) {
+        private fun processReceivedJson(json: String, fromDevice: BluetoothDevice) {
             scope.launch {
                 protocol.deserializeMessage(json)?.let { 
-                    val reply = protocol.processReceivedMessage(it)
+                    val (reply, forward) = protocol.processReceivedMessage(it)
                     if (reply != null) {
-                        broadcastData(protocol.serializeSyncUpdate(reply))
+                        sendDataViaNotification(fromDevice, protocol.serializeSyncUpdate(reply))
+                    }
+                    if (forward != null) {
+                        networkManagerProvider()?.forwardToOthers(forward, fromDevice.address)
                     }
                     return@launch 
                 }

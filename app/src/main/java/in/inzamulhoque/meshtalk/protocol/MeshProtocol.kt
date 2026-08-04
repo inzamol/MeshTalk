@@ -2,6 +2,7 @@ package `in`.inzamulhoque.meshtalk.protocol
 
 import `in`.inzamulhoque.meshtalk.data.local.dao.MessageDao
 import `in`.inzamulhoque.meshtalk.data.local.dao.PeerDao
+import `in`.inzamulhoque.meshtalk.data.local.dao.GroupDao
 import `in`.inzamulhoque.meshtalk.data.local.entity.Message
 import `in`.inzamulhoque.meshtalk.data.local.entity.Peer
 import `in`.inzamulhoque.meshtalk.data.local.entity.MessageStatus
@@ -29,11 +30,14 @@ enum class SyncUpdateType {
     READ
 }
 
+
+
 class MeshProtocol(
     private val context: Context,
     private val myId: String,
     private val messageDao: MessageDao,
     private val peerDao: PeerDao,
+    private val groupDao: GroupDao,
     private val identityManager: IdentityManager,
     private val settingsManager: SettingsManager
 ) {
@@ -47,7 +51,9 @@ class MeshProtocol(
             peerId = myId,
             encryptionKey = encryptionKey,
             displayName = displayName,
-            inventory = getInventory()
+            inventory = getInventory(),
+            bio = settingsManager.bio,
+            avatarBase64 = settingsManager.avatarBase64
         )
     }
 
@@ -57,12 +63,16 @@ class MeshProtocol(
             publicKey = handshake.peerId,
             encryptionKey = handshake.encryptionKey,
             displayName = handshake.displayName,
-            deviceAddress = deviceAddress
+            deviceAddress = deviceAddress,
+            bio = handshake.bio,
+            avatarBase64 = handshake.avatarBase64
         )
         if (settingsManager.isConnectionToastEnabled) {
             ToastHelper.showToast(context, "Securely connected to ${handshake.displayName}")
         }
-        return getMessagesToSync(handshake.inventory)
+        val messages = getMessagesToSync(handshake.inventory)
+        Log.d("MeshProtocol", "Handshake from ${handshake.displayName}, syncing ${messages.size} messages")
+        return messages
     }
 
     fun serializeHandshake(handshake: Handshake): String = handshakeAdapter.toJson(handshake)
@@ -71,7 +81,16 @@ class MeshProtocol(
     fun serializeSyncUpdate(update: SyncUpdate): String = syncUpdateAdapter.toJson(update)
     fun deserializeSyncUpdate(json: String): SyncUpdate? = try { syncUpdateAdapter.fromJson(json) } catch (e: Exception) { null }
 
-    suspend fun onPeerDiscovered(peerId: String, publicKey: String, encryptionKey: String?, displayName: String?, deviceAddress: String?) {
+    suspend fun onPeerDiscovered(
+        peerId: String, 
+        publicKey: String, 
+        encryptionKey: String?, 
+        displayName: String?, 
+        deviceAddress: String?,
+        bio: String? = null,
+        avatarBase64: String? = null,
+        rssi: Int = -100
+    ) {
         val allPeers = peerDao.getAllPeersSync()
         
         if (deviceAddress != null) {
@@ -96,14 +115,27 @@ class MeshProtocol(
 
         val existingPeer = peerDao.getPeerById(peerId)
         if (existingPeer == null) {
-            peerDao.insertPeer(Peer(peerId, publicKey, encryptionKey, displayName, deviceAddress, System.currentTimeMillis()))
+            peerDao.insertPeer(Peer(
+                id = peerId, 
+                publicKey = publicKey, 
+                encryptionKey = encryptionKey, 
+                displayName = displayName, 
+                deviceAddress = deviceAddress, 
+                lastSeen = System.currentTimeMillis(),
+                bio = bio,
+                avatarUri = avatarBase64, // Store base64 in avatarUri for now
+                rssi = rssi
+            ))
         } else {
             peerDao.updatePeer(existingPeer.copy(
                 lastSeen = System.currentTimeMillis(), 
                 deviceAddress = deviceAddress ?: existingPeer.deviceAddress,
                 encryptionKey = encryptionKey ?: existingPeer.encryptionKey,
                 displayName = displayName ?: existingPeer.displayName,
-                publicKey = if (publicKey.isNotEmpty()) publicKey else existingPeer.publicKey
+                publicKey = if (publicKey.isNotEmpty()) publicKey else existingPeer.publicKey,
+                bio = bio ?: existingPeer.bio,
+                avatarUri = avatarBase64 ?: existingPeer.avatarUri,
+                rssi = rssi
             ))
         }
     }
@@ -117,14 +149,21 @@ class MeshProtocol(
         return messagesToForward.filter { !remoteInventory.contains(it.uuid) }
     }
 
-    suspend fun processReceivedMessage(message: Message): SyncUpdate? {
+    suspend fun processReceivedMessage(message: Message): Pair<SyncUpdate?, Message?> {
         if (messageDao.getMessageByUuid(message.uuid) != null) {
-            return null
+            return null to null
         }
 
-        if (message.receiverId == myId) {
-            val decryptedContent = if (message.isEncrypted) {
+        // Check if it's for me (Direct or Group)
+        val isForMe = message.receiverId == myId || (message.groupId != null && (message.groupId == PUBLIC_GROUP_ID || isMemberOf(message.groupId)))
+
+        if (isForMe) {
+            val decryptedContent = if (message.isEncrypted && message.groupId != PUBLIC_GROUP_ID) {
                 try {
+                    // For group messages, we would ideally use a group key.
+                    // For now, we'll assume group messages are unencrypted or handled differently.
+                    // Implementing full group encryption is complex (DH for each pair or a shared group key).
+                    // As per plan, let's stick to basic group sync first.
                     identityManager.decryptMessage(message.content)
                 } catch (e: Exception) { "[Encrypted Message]" }
             } else message.content
@@ -144,19 +183,25 @@ class MeshProtocol(
                 )
             }
             
-            // Return a DELIVERED update to send back to the sender
-            return SyncUpdate(SyncUpdateType.DELIVERED, message.uuid, myId)
+            // Return a DELIVERED update back to the sender
+            return SyncUpdate(SyncUpdateType.DELIVERED, message.uuid, myId) to null
             
         } else if (message.hopCount < MAX_HOPS && message.expiryTimestamp > System.currentTimeMillis()) {
             if (settingsManager.isForwardingEnabled) {
-                messageDao.insertMessage(message.copy(
+                val carrierMessage = message.copy(
                     id = 0, 
                     hopCount = message.hopCount + 1,
                     status = MessageStatus.CARRYING
-                ))
+                )
+                messageDao.insertMessage(carrierMessage)
+                return null to carrierMessage
             }
         }
-        return null
+        return null to null
+    }
+
+    private suspend fun isMemberOf(groupId: String): Boolean {
+        return groupDao.getGroupById(groupId) != null
     }
 
     suspend fun processSyncUpdate(update: SyncUpdate) {
@@ -190,5 +235,6 @@ class MeshProtocol(
 
     companion object {
         private const val MAX_HOPS = 10
+        const val PUBLIC_GROUP_ID = "shout_channel"
     }
 }
