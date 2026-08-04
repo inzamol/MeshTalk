@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
 import `in`.inzamulhoque.meshtalk.data.local.entity.Peer
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,12 +58,32 @@ fun PeerListPane(
 
 @Composable
 fun PeerItem(peer: Peer, onClick: () -> Unit) {
+    val isHandshaked = !peer.encryptionKey.isNullOrBlank()
+    
     ListItem(
-        headlineContent = { Text(peer.displayName ?: "Unknown Peer") },
-        supportingContent = { Text(peer.id.take(16) + "...") },
-        leadingContent = {
-            Icon(Icons.Rounded.Person, contentDescription = null)
+        headlineContent = { 
+            Text(
+                text = peer.displayName ?: "Unknown Peer",
+                style = MaterialTheme.typography.titleMedium
+            ) 
         },
-        modifier = Modifier.clickable { onClick() }
+        supportingContent = { 
+            val statusText = if (isHandshaked) {
+                peer.id.take(16) + "..."
+            } else {
+                "Connecting / Handshaking..."
+            }
+            Text(statusText) 
+        },
+        leadingContent = {
+            Icon(
+                Icons.Rounded.Person, 
+                contentDescription = null,
+                tint = if (isHandshaked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+            )
+        },
+        modifier = Modifier
+            .alpha(if (isHandshaked) 1f else 0.6f)
+            .clickable(enabled = isHandshaked) { onClick() }
     )
 }

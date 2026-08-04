@@ -24,6 +24,8 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager
 import `in`.inzamulhoque.meshtalk.ui.MainScreen
 import `in`.inzamulhoque.meshtalk.ui.theme.MeshTalkTheme
+import `in`.inzamulhoque.meshtalk.util.PermissionUtils
+import android.net.Uri
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
@@ -38,17 +40,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MeshTalkTheme {
-                val permissions = mutableListOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.BLUETOOTH_SCAN,
-                    Manifest.permission.BLUETOOTH_ADVERTISE,
-                    Manifest.permission.BLUETOOTH_CONNECT
-                )
-                
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-                }
-
+                val permissions = PermissionUtils.getRequiredPermissions()
                 val permissionState = rememberMultiplePermissionsState(permissions)
 
                 var isBluetoothEnabled by remember { mutableStateOf(true) }
@@ -112,12 +104,31 @@ class MainActivity : ComponentActivity() {
                                 .fillMaxSize()
                                 .padding(innerPadding),
                             verticalArrangement = Arrangement.Center,
-                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text("Mesh Talk requires permissions to function.")
+                            val textToShow = if (permissionState.shouldShowRationale) {
+                                "Mesh Talk needs Bluetooth and Location permissions to discover nearby peers."
+                            } else {
+                                "Mesh Talk requires permissions to function. Please grant them in settings if the dialog doesn't appear."
+                            }
+                            Text(textToShow, modifier = Modifier.padding(horizontal = 32.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             Spacer(modifier = Modifier.height(16.dp))
-                            Button(onClick = { permissionState.launchMultiplePermissionRequest() }) {
-                                Text("Grant Permissions")
+                            if (permissionState.shouldShowRationale || !permissionState.allPermissionsGranted) {
+                                Button(onClick = { permissionState.launchMultiplePermissionRequest() }) {
+                                    Text("Grant Permissions")
+                                }
+                            }
+                            
+                            if (!permissionState.shouldShowRationale && !permissionState.allPermissionsGranted) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                TextButton(onClick = {
+                                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                        data = Uri.fromParts("package", packageName, null)
+                                    }
+                                    startActivity(intent)
+                                }) {
+                                    Text("Open Settings")
+                                }
                             }
                         }
                     }

@@ -1,11 +1,13 @@
 package `in`.inzamulhoque.meshtalk.ble
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.bluetooth.*
 import android.content.Context
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+import `in`.inzamulhoque.meshtalk.util.PermissionUtils
 import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import kotlinx.coroutines.*
 
@@ -13,6 +15,8 @@ class MeshGattClient(
     private val context: Context,
     private val device: BluetoothDevice,
     private val protocol: MeshProtocol,
+    private val myEncryptionKey: String,
+    private val myDisplayName: String,
     private val onSyncComplete: () -> Unit
 ) {
     private var gatt: BluetoothGatt? = null
@@ -23,12 +27,25 @@ class MeshGattClient(
     private var currentMtu = 23 // Default BLE MTU
     private var nextMsgId = 0
     private val pendingChunks = mutableListOf<ByteArray>()
-    private var currentPeerId: String? = null
-    private var currentEncryptionKey: String? = null
+    private val reassemblyBuffers = java.util.concurrent.ConcurrentHashMap<Byte, ReassemblyBuffer>()
     private var isHandshakeStarted = false
 
+    data class ReassemblyBuffer(
+        val msgId: Byte,
+        val total: Int,
+        val chunks: MutableMap<Int, ByteArray> = mutableMapOf()
+    )
+
+    @SuppressLint("MissingPermission")
     fun connect() {
         Log.d("MeshGattClient", "Connecting to ${device.address}")
+        
+        // Permission check
+        if (!PermissionUtils.hasPermission(context, Manifest.permission.BLUETOOTH_CONNECT)) {
+            Log.e("MeshGattClient", "Missing BLUETOOTH_CONNECT permission")
+            return
+        }
+
         startTimeout()
         try {
             gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
@@ -61,19 +78,18 @@ class MeshGattClient(
             gatt?.disconnect()
             gatt?.close()
             gatt = null
-        } catch (e: SecurityException) {
-            Log.e("MeshGattClient", "Permission denied for disconnecting GATT", e)
+        } catch (_: SecurityException) {
+            Log.e("MeshGattClient", "Permission denied for disconnecting GATT")
         }
     }
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     private fun processWriteQueue(gatt: BluetoothGatt) {
         scope.launch {
             processWriteQueueSuspend(gatt)
         }
     }
 
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    @SuppressLint("MissingPermission")
     private suspend fun processWriteQueueSuspend(gatt: BluetoothGatt) {
         if (isWriting) return
 
@@ -88,7 +104,7 @@ class MeshGattClient(
                 
                 var success = false
                 var attempts = 0
-                while (!success && attempts < 3) {
+                while (!success && attempts < 5) { // Increased to 5 attempts
                     success = try {
                         gatt.writeCharacteristic(char)
                     } catch (e: SecurityException) {
@@ -98,17 +114,19 @@ class MeshGattClient(
                     
                     if (!success) {
                         attempts++
-                        if (attempts < 3) {
-                            Log.w("MeshGattClient", "Write busy, retrying chunk in 100ms... (Attempt $attempts)")
-                            delay(100)
+                        if (attempts < 5) {
+                            val waitTime = attempts * 150L // Gradual increase in wait time
+                            Log.w("MeshGattClient", "Write busy, retrying chunk in ${waitTime}ms... (Attempt $attempts)")
+                            delay(waitTime)
                         }
                     }
                 }
                 
                 if (success) {
                     isWriting = true
+                    Log.d("MeshGattClient", "Chunk write initiated for ${device.address}")
                 } else {
-                    Log.e("MeshGattClient", "Failed to write chunk to ${device.address} after 3 attempts")
+                    Log.e("MeshGattClient", "Failed to write chunk to ${device.address} after 5 attempts")
                     ToastHelper.showToast(context, "Failed to send message chunk")
                     withContext(Dispatchers.Main) {
                         disconnect()
@@ -122,10 +140,16 @@ class MeshGattClient(
             return
         }
 
-        if (writeQueue.isEmpty()) {
-            Log.d("MeshGattClient", "Sync complete, disconnecting from ${device.address}")
-            withContext(Dispatchers.Main) {
-                try { gatt.disconnect() } catch (e: SecurityException) {}
+        if (writeQueue.isEmpty() && pendingChunks.isEmpty()) {
+            Log.d("MeshGattClient", "Sync queue empty for ${device.address}, holding connection for 10s...")
+            scope.launch {
+                delay(10000)
+                if (writeQueue.isEmpty() && pendingChunks.isEmpty()) {
+                    Log.d("MeshGattClient", "Holding complete, disconnecting from ${device.address}")
+                    withContext(Dispatchers.Main) {
+                        try { gatt.disconnect() } catch (e: SecurityException) {}
+                    }
+                }
             }
             return
         }
@@ -156,20 +180,7 @@ class MeshGattClient(
         processWriteQueueSuspend(gatt)
     }
 
-    private fun readInventory(gatt: BluetoothGatt) {
-        val inventoryChar = gatt.getService(MeshConstants.SERVICE_UUID)
-            ?.getCharacteristic(MeshConstants.INVENTORY_CHAR_UUID)
-        try {
-            if (inventoryChar != null) {
-                gatt.readCharacteristic(inventoryChar)
-            } else {
-                gatt.disconnect()
-            }
-        } catch (e: SecurityException) {
-            gatt.disconnect()
-        }
-    }
-
+    @SuppressLint("MissingPermission")
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             try {
@@ -198,107 +209,116 @@ class MeshGattClient(
             }
         }
 
+        @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS && !isHandshakeStarted) {
-                isHandshakeStarted = true
-                scope.launch {
-                    val myName = protocol.createHandshake("", "").displayName // Access via a better way later
-                    // We need my encryption key and name here. 
-                    // Let's pass them into the client or get them from a provider.
+            if (status == BluetoothGatt.GATT_SUCCESS && !isHandshakeStarted && gatt != null) {
+                // Enable notifications first
+                val service = gatt.getService(MeshConstants.SERVICE_UUID)
+                val char = service?.getCharacteristic(MeshConstants.MESSAGE_EXCHANGE_CHAR_UUID)
+                if (char != null) {
+                    gatt.setCharacteristicNotification(char, true)
+                    val descriptor = char.getDescriptor(MeshConstants.CLIENT_CONFIG_DESCRIPTOR_UUID)
+                    if (descriptor != null) {
+                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        Log.d("MeshGattClient", "Writing notification descriptor for ${device.address}")
+                        gatt.writeDescriptor(descriptor)
+                    } else {
+                        Log.e("MeshGattClient", "Notification descriptor not found!")
+                        startHandshake(gatt)
+                    }
+                } else {
+                    Log.e("MeshGattClient", "Message exchange characteristic not found!")
+                    startHandshake(gatt)
                 }
             }
         }
 
-        override fun onCharacteristicRead(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
+        @SuppressLint("MissingPermission")
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt?,
+            descriptor: BluetoothGattDescriptor?,
             status: Int
         ) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                when (characteristic.uuid) {
-                    MeshConstants.IDENTITY_CHAR_UUID -> {
-                        val value = characteristic.value ?: byteArrayOf()
-                        val peerId = String(value)
-                        Log.d("MeshGattClient", "Discovered Peer ID: $peerId")
-                        currentPeerId = peerId
-                        val encryptionChar = gatt.getService(MeshConstants.SERVICE_UUID)
-                            ?.getCharacteristic(MeshConstants.ENCRYPTION_KEY_CHAR_UUID)
-                        try {
-                            if (encryptionChar != null) {
-                                gatt.readCharacteristic(encryptionChar)
+            if (descriptor?.uuid == MeshConstants.CLIENT_CONFIG_DESCRIPTOR_UUID && status == BluetoothGatt.GATT_SUCCESS) {
+                Log.d("MeshGattClient", "Notification descriptor written for ${device.address}")
+                if (gatt != null) startHandshake(gatt)
+            } else if (status != BluetoothGatt.GATT_SUCCESS) {
+                Log.e("MeshGattClient", "Failed to write descriptor: $status")
+                if (gatt != null) startHandshake(gatt) // Try handshake anyway
+            }
+        }
+
+        private fun startHandshake(gatt: BluetoothGatt) {
+            if (isHandshakeStarted) return
+            isHandshakeStarted = true
+            
+            scope.launch {
+                val handshake = protocol.createHandshake(myEncryptionKey, myDisplayName)
+                val json = protocol.serializeHandshake(handshake)
+                Log.d("MeshGattClient", "Sending handshake to ${device.address} (Size: ${json.length})")
+                writeQueue.add(json.toByteArray())
+                
+                // Permission check
+                if (!PermissionUtils.hasPermission(context, Manifest.permission.BLUETOOTH_CONNECT)) {
+                    Log.e("MeshGattClient", "Missing BLUETOOTH_CONNECT during handshake")
+                    return@launch
+                }
+                processWriteQueueSuspend(gatt)
+            }
+        }
+
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic
+        ) {
+            if (characteristic.uuid == MeshConstants.MESSAGE_EXCHANGE_CHAR_UUID) {
+                val data = characteristic.value ?: return
+                if (data.size >= 4 && data[0] == 0xCC.toByte()) {
+                    val msgId = data[1]
+                    val index = data[2].toInt() and 0xFF
+                    val total = data[3].toInt() and 0xFF
+                    val chunkData = data.copyOfRange(4, data.size)
+                    
+                    val buffer = reassemblyBuffers.getOrPut(msgId) {
+                        ReassemblyBuffer(msgId, total)
+                    }
+                    buffer.chunks[index] = chunkData
+                    
+                    if (buffer.chunks.size == total) {
+                        val fullData = ByteArray(buffer.chunks.values.sumOf { it.size })
+                        var currentOffset = 0
+                        for (i in 0 until total) {
+                            val chunk = buffer.chunks[i] ?: break
+                            chunk.copyInto(fullData, currentOffset)
+                            currentOffset += chunk.size
+                        }
+                        
+                        if (currentOffset == fullData.size) {
+                            val json = String(fullData)
+                            Log.d("MeshGattClient", "Received notification data from ${device.address} ($total chunks, ${fullData.size} bytes)")
+                            
+                            val handshake = protocol.deserializeHandshake(json)
+                            if (handshake != null) {
+                                scope.launch {
+                                    Log.d("MeshGattClient", "Received handshake reply from ${handshake.displayName}")
+                                    protocol.handleHandshake(handshake, device.address)
+                                }
                             } else {
-                                // Should not happen with new protocol, but fallback
-                                val nameChar = gatt.getService(MeshConstants.SERVICE_UUID)
-                                    ?.getCharacteristic(MeshConstants.DISPLAY_NAME_CHAR_UUID)
-                                if (nameChar != null) {
-                                    gatt.readCharacteristic(nameChar)
-                                } else {
-                                    scope.launch {
-                                        protocol.onPeerDiscovered(peerId, "", null, null, device.address)
-                                        readInventory(gatt)
+                                scope.launch {
+                                    val message = protocol.deserializeMessage(json)
+                                    if (message != null) {
+                                        protocol.processReceivedMessage(message)
                                     }
                                 }
                             }
-                        } catch (e: SecurityException) {
-                            gatt.disconnect()
                         }
-                    }
-                    MeshConstants.ENCRYPTION_KEY_CHAR_UUID -> {
-                        val value = characteristic.value ?: byteArrayOf()
-                        val encryptionKey = String(value)
-                        currentEncryptionKey = encryptionKey
-                        
-                        val nameChar = gatt.getService(MeshConstants.SERVICE_UUID)
-                            ?.getCharacteristic(MeshConstants.DISPLAY_NAME_CHAR_UUID)
-                        try {
-                            if (nameChar != null) {
-                                gatt.readCharacteristic(nameChar)
-                            } else {
-                                val peerId = currentPeerId ?: return
-                                scope.launch {
-                                    protocol.onPeerDiscovered(peerId, "", encryptionKey, null, device.address)
-                                    readInventory(gatt)
-                                }
-                            }
-                        } catch (e: SecurityException) {
-                            gatt.disconnect()
-                        }
-                    }
-                    MeshConstants.DISPLAY_NAME_CHAR_UUID -> {
-                        val value = characteristic.value ?: byteArrayOf()
-                        val displayName = String(value)
-                        val peerId = currentPeerId ?: return
-                        val encryptionKey = currentEncryptionKey
-                        Log.d("MeshGattClient", "Discovered Peer Name: $displayName")
-                        
-                        scope.launch {
-                            protocol.onPeerDiscovered(peerId, "", encryptionKey, displayName, device.address)
-                            readInventory(gatt)
-                            cancelTimeout() // Successfully synced identity
-                        }
-                    }
-                    MeshConstants.INVENTORY_CHAR_UUID -> {
-                        val value = characteristic.value ?: byteArrayOf()
-                        val inventoryStr = String(value)
-                        val remoteInventory = if (inventoryStr.isEmpty()) emptyList() else inventoryStr.split(",").filter { it.isNotEmpty() }
-                        Log.d("MeshGattClient", "Remote Inventory size: ${remoteInventory.size}")
-                        
-                        scope.launch {
-                            val messagesToSync = protocol.getMessagesToSync(remoteInventory)
-                            Log.d("MeshGattClient", "Messages to sync: ${messagesToSync.size}")
-                            messagesToSync.forEach { msg ->
-                                writeQueue.add(protocol.serializeMessage(msg).toByteArray())
-                            }
-                            delay(200) // Stack settlement delay
-                            processWriteQueueSuspend(gatt)
-                        }
+                        reassemblyBuffers.remove(msgId)
                     }
                 }
-            } else {
-                try { gatt.disconnect() } catch (e: SecurityException) {}
             }
         }
 
+        @SuppressLint("MissingPermission")
         override fun onCharacteristicWrite(
             gatt: BluetoothGatt?,
             characteristic: BluetoothGattCharacteristic?,
@@ -307,6 +327,8 @@ class MeshGattClient(
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.e("MeshGattClient", "Write failed for ${device.address} with status: $status")
                 ToastHelper.showToast(context, "Sync write failed (status: $status)")
+            } else {
+                Log.d("MeshGattClient", "Write successful for ${device.address}")
             }
             isWriting = false
             if (gatt != null) processWriteQueue(gatt)
