@@ -1,0 +1,37 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+
+    <!-- Outer Glow / Shadow -->
+    <path
+        android:fillColor="#1A6650a4"
+        android:pathData="M100,20 C50,20 20,60 20,100 C20,140 50,180 100,180 C150,180 180,140 180,100 C180,60 150,20 100,20 Z" />
+
+    <!-- Main Logo Shape (Interconnected Mesh) -->
+    <path
+        android:strokeColor="#6650a4"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M60,60 L100,90 L140,60 M60,140 L100,110 L140,140 M60,60 L60,140 M140,60 L140,140 M100,90 L100,110" />
+
+    <!-- Active Nodes -->
+    <path
+        android:fillColor="#6650a4"
+        android:pathData="M60,60m-5,0a5,5 0,1 1,10,0a5,5 0,1 1,-10,0" />
+    <path
+        android:fillColor="#6650a4"
+        android:pathData="M140,60m-5,0a5,5 0,1 1,10,0a5,5 0,1 1,-10,0" />
+    <path
+        android:fillColor="#6650a4"
+        android:pathData="M60,140m-5,0a5,5 0,1 1,10,0a5,5 0,1 1,-10,0" />
+    <path
+        android:fillColor="#6650a4"
+        android:pathData="M140,140m-5,0a5,5 0,1 1,10,0a5,5 0,1 1,-10,0" />
+    <path
+        android:fillColor="#D0BCFF"
+        android:pathData="M100,100m-8,0a8,8 0,1 1,16,0a8,8 0,1 1,-16,0" />
+
+</vector>

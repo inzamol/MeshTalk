@@ -1,11 +1,13 @@
 package `in`.inzamulhoque.meshtalk
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -25,7 +27,7 @@ import `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager
 import `in`.inzamulhoque.meshtalk.ui.MainScreen
 import `in`.inzamulhoque.meshtalk.ui.theme.MeshTalkTheme
 import `in`.inzamulhoque.meshtalk.util.PermissionUtils
-import android.net.Uri
+import `in`.inzamulhoque.meshtalk.util.NotificationHelper
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
@@ -45,6 +47,14 @@ class MainActivity : ComponentActivity() {
 
                 var isBluetoothEnabled by remember { mutableStateOf(true) }
                 var isLocationEnabled by remember { mutableStateOf(true) }
+                var initialPeerId by remember { mutableStateOf<String?>(null) }
+
+                LaunchedEffect(intent) {
+                    val peerId = intent.getStringExtra(NotificationHelper.EXTRA_PEER_ID)
+                    if (peerId != null) {
+                        initialPeerId = peerId
+                    }
+                }
 
                 LaunchedEffect(Unit) {
                     val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -59,9 +69,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 LaunchedEffect(permissionState.allPermissionsGranted, isBluetoothEnabled, isLocationEnabled) {
-                    Log.d("MainActivity", "Permissions: ${permissionState.allPermissionsGranted}, BT: $isBluetoothEnabled, Loc: $isLocationEnabled")
                     if (permissionState.allPermissionsGranted && isBluetoothEnabled && isLocationEnabled) {
-                        Log.d("MainActivity", "Starting MeshNetworkManager")
                         (application as MeshApplication).meshNetworkManager.start()
                     }
                 }
@@ -79,7 +87,9 @@ class MainActivity : ComponentActivity() {
                                 Button(onClick = {
                                     try {
                                         if (!isBluetoothEnabled) {
-                                            startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+                                            @SuppressLint("MissingPermission")
+                                            val intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                                            startActivity(intent)
                                         } else {
                                             startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
                                         }
@@ -92,7 +102,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     } else {
-                        MainScreen(myId = myId, app = app)
+                        MainScreen(myId = myId, app = app, initialPeerId = initialPeerId)
                     }
                 } else {
                     Scaffold(

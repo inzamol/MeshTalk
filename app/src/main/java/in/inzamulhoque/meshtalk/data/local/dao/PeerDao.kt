@@ -29,4 +29,7 @@ interface PeerDao {
 
     @Delete
     suspend fun deletePeer(peer: Peer)
+
+    @Query("DELETE FROM peers")
+    suspend fun deleteAllPeers()
 }

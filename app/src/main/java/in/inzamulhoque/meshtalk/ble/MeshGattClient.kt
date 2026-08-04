@@ -73,17 +73,19 @@ class MeshGattClient(
     }
 
     fun disconnect() {
-        cancelTimeout()
-        try {
-            gatt?.disconnect()
-            gatt?.close()
-            gatt = null
-        } catch (_: SecurityException) {
-            Log.e("MeshGattClient", "Permission denied for disconnecting GATT")
+        // ... existing code ...
+    }
+
+    fun sendData(json: String) {
+        scope.launch {
+            writeQueue.add(json.toByteArray())
+            val g = gatt ?: return@launch
+            processWriteQueueSuspend(g)
         }
     }
 
     private fun processWriteQueue(gatt: BluetoothGatt) {
+// ...
         scope.launch {
             processWriteQueueSuspend(gatt)
         }
@@ -307,7 +309,16 @@ class MeshGattClient(
                                 scope.launch {
                                     val message = protocol.deserializeMessage(json)
                                     if (message != null) {
-                                        protocol.processReceivedMessage(message)
+                                        val reply = protocol.processReceivedMessage(message)
+                                        if (reply != null) {
+                                            sendData(protocol.serializeSyncUpdate(reply))
+                                        }
+                                        return@launch
+                                    }
+
+                                    val syncUpdate = protocol.deserializeSyncUpdate(json)
+                                    if (syncUpdate != null) {
+                                        protocol.processSyncUpdate(syncUpdate)
                                     }
                                 }
                             }

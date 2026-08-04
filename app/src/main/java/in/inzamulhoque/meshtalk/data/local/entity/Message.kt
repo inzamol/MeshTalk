@@ -38,5 +38,5 @@ data class Message(
 )
 
 enum class MessageStatus {
-    SENT, DELIVERED, READ, FAILED, CARRYING
+    PENDING, SENT, DELIVERED, READ, FAILED, CARRYING
 }

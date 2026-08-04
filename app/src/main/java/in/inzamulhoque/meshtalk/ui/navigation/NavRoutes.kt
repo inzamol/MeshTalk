@@ -15,4 +15,8 @@ sealed interface NavRoute : NavKey, Parcelable {
     @Serializable
     @Parcelize
     data class Chat(val peerId: String) : NavRoute
+
+    @Serializable
+    @Parcelize
+    data object Settings : NavRoute
 }
