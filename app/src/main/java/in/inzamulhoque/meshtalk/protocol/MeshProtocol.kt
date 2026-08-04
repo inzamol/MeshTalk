@@ -10,6 +10,7 @@ import `in`.inzamulhoque.meshtalk.util.NotificationHelper
 import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import `in`.inzamulhoque.meshtalk.util.SettingsManager
 import `in`.inzamulhoque.meshtalk.crypto.IdentityManager
+import androidx.annotation.Keep
 import android.content.Context
 import android.util.Log
 import com.squareup.moshi.Json
@@ -17,14 +18,16 @@ import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
+@Keep
 @JsonClass(generateAdapter = true)
 data class SyncUpdate(
-    val type: SyncUpdateType,
-    val targetUuid: String,
-    val senderId: String,
-    val timestamp: Long = System.currentTimeMillis()
+    @Json(name = "t") val type: SyncUpdateType,
+    @Json(name = "u") val targetUuid: String,
+    @Json(name = "s") val senderId: String,
+    @Json(name = "ts") val timestamp: Long = System.currentTimeMillis()
 )
 
+@Keep
 enum class SyncUpdateType {
     @Json(name = "DELETE_MESSAGE") DELETE_MESSAGE,
     @Json(name = "DELIVERED") DELIVERED,

@@ -1,5 +1,6 @@
 package `in`.inzamulhoque.meshtalk.data.local.entity
 
+import androidx.annotation.Keep
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -7,6 +8,7 @@ import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import java.util.UUID
 
+@Keep
 @Entity(
     tableName = "messages",
     indices = [Index(value = ["uuid"], unique = true)]
@@ -24,7 +26,7 @@ data class Message(
     
     @Json(name = "c") val content: String,
     
-    val localPlaintext: String? = null,
+    @Json(name = "lp") val localPlaintext: String? = null,
     
     @Json(name = "t") val timestamp: Long = System.currentTimeMillis(),
     
@@ -38,11 +40,12 @@ data class Message(
     
     @Json(name = "ty") val type: MessageType = MessageType.TEXT,
     
-    val mediaUri: String? = null,
+    @Json(name = "mu") val mediaUri: String? = null,
 
     @Json(name = "g") val groupId: String? = null
 )
 
+@Keep
 enum class MessageStatus {
     @Json(name = "PENDING") PENDING,
     @Json(name = "SENT") SENT,
