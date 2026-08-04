@@ -13,6 +13,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.util.Base64
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import java.io.ByteArrayOutputStream
+import coil.compose.AsyncImage
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsPane(
@@ -20,12 +31,27 @@ fun SettingsPane(
     onBack: () -> Unit
 ) {
     val displayName by viewModel.displayName.collectAsState()
+    val bio by viewModel.bio.collectAsState()
+    val avatarBase64 by viewModel.avatarBase64.collectAsState()
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsState()
     val forwardingEnabled by viewModel.forwardingEnabled.collectAsState()
     val connectionToastEnabled by viewModel.connectionToastEnabled.collectAsState()
     
     var showDeleteMessagesDialog by remember { mutableStateOf(false) }
     var showDeletePeersDialog by remember { mutableStateOf(false) }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            val inputStream = context.contentResolver.openInputStream(it)
+            val bitmap = BitmapFactory.decodeStream(inputStream)
+            val resized = Bitmap.createScaledBitmap(bitmap, 200, 200, true)
+            val outputStream = ByteArrayOutputStream()
+            resized.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
+            val base64 = Base64.encodeToString(outputStream.toByteArray(), Base64.DEFAULT)
+            viewModel.updateAvatar(base64)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -48,15 +74,39 @@ fun SettingsPane(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(
-                painter = androidx.compose.ui.res.painterResource(id = `in`.inzamulhoque.meshtalk.R.drawable.ic_mesh_logo),
-                contentDescription = null,
-                modifier = Modifier.size(80.dp),
-                tint = Color.Unspecified
-            )
+            Box(
+                modifier = Modifier
+                    .size(100.dp)
+                    .clip(CircleShape)
+                    .clickable { avatarPicker.launch("image/*") }
+            ) {
+                if (avatarBase64 != null) {
+                    val bytes = Base64.decode(avatarBase64, Base64.DEFAULT)
+                    AsyncImage(
+                        model = bytes,
+                        contentDescription = "Avatar",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                } else {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Icon(
+                            Icons.Rounded.AddAPhoto,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .padding(24.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
             
             Text(
-                "Mesh Talk",
+                displayName.ifBlank { "New User" },
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -76,6 +126,15 @@ fun SettingsPane(
                     label = { Text("Display Name") },
                     modifier = Modifier.fillMaxWidth(),
                     leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null) }
+                )
+
+                OutlinedTextField(
+                    value = bio,
+                    onValueChange = { viewModel.updateBio(it) },
+                    label = { Text("Bio") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Icon(Icons.Rounded.Info, contentDescription = null) },
+                    placeholder = { Text("Tell us about yourself...") }
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))

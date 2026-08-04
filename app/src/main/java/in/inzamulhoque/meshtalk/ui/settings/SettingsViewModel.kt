@@ -25,9 +25,25 @@ class SettingsViewModel(
     private val _connectionToastEnabled = MutableStateFlow(settingsManager.isConnectionToastEnabled)
     val connectionToastEnabled = _connectionToastEnabled.asStateFlow()
 
+    private val _bio = MutableStateFlow(settingsManager.bio ?: "")
+    val bio = _bio.asStateFlow()
+
+    private val _avatarBase64 = MutableStateFlow(settingsManager.avatarBase64)
+    val avatarBase64 = _avatarBase64.asStateFlow()
+
     fun updateDisplayName(name: String) {
         settingsManager.displayName = name
         _displayName.value = name
+    }
+
+    fun updateBio(bio: String) {
+        settingsManager.bio = bio
+        _bio.value = bio
+    }
+
+    fun updateAvatar(base64: String?) {
+        settingsManager.avatarBase64 = base64
+        _avatarBase64.value = base64
     }
 
     fun setNotificationsEnabled(enabled: Boolean) {

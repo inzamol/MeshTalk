@@ -34,9 +34,19 @@ data class Message(
     
     @Json(name = "h") val hopCount: Int = 0,
     
-    @Json(name = "x") val expiryTimestamp: Long = System.currentTimeMillis() + 7 * 24 * 60 * 60 * 1000 // 7 days default
+    @Json(name = "x") val expiryTimestamp: Long = System.currentTimeMillis() + 7 * 24 * 60 * 60 * 1000, // 7 days default
+    
+    @Json(name = "ty") val type: MessageType = MessageType.TEXT,
+    
+    val mediaUri: String? = null,
+
+    @Json(name = "g") val groupId: String? = null
 )
 
 enum class MessageStatus {
     PENDING, SENT, DELIVERED, READ, FAILED, CARRYING
+}
+
+enum class MessageType {
+    TEXT, IMAGE, FILE
 }

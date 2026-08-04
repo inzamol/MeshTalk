@@ -16,6 +16,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import `in`.inzamulhoque.meshtalk.data.local.entity.Peer
+import android.util.Base64
+import coil.compose.AsyncImage
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.style.TextOverflow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,6 +111,8 @@ fun PeerListPane(
     }
 }
 
+
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PeerItem(peer: Peer, onClick: () -> Unit, onLongClick: () -> Unit) {
@@ -120,19 +127,34 @@ fun PeerItem(peer: Peer, onClick: () -> Unit, onLongClick: () -> Unit) {
         },
         supportingContent = { 
             val statusText = if (isHandshaked) {
-                peer.id.take(16) + "..."
+                peer.bio ?: (peer.id.take(16) + "...")
             } else {
                 "Connecting / Handshaking..."
             }
-            Text(statusText) 
+            Text(
+                statusText,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            ) 
         },
         leadingContent = {
             Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Rounded.Person, 
-                    contentDescription = null,
-                    tint = if (isHandshaked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                )
+                if (peer.avatarUri != null) {
+                    val bytes = try { Base64.decode(peer.avatarUri, Base64.DEFAULT) } catch (e: Exception) { null }
+                    AsyncImage(
+                        model = bytes,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp).clip(CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        Icons.Rounded.Person, 
+                        contentDescription = null,
+                        tint = if (isHandshaked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    )
+                }
+                
                 if (!isHandshaked) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(32.dp),

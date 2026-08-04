@@ -29,6 +29,7 @@ class MeshNetworkManager(
         myId = identityManager.getMyId(),
         messageDao = database.messageDao(),
         peerDao = database.peerDao(),
+        groupDao = database.groupDao(),
         identityManager = identityManager,
         settingsManager = (context.applicationContext as `in`.inzamulhoque.meshtalk.MeshApplication).settingsManager
     )
@@ -160,7 +161,7 @@ class MeshNetworkManager(
             connectionCooldowns[deviceAddress] = now
             
             Log.d("MeshNetworkManager", "Initiating GATT client connection to $deviceAddress")
-            val client = MeshGattClient(context, device, protocol, identityManager.getMyEncryptionKey(), identityManager.getDisplayName()) {
+            val client = MeshGattClient(context, device, protocol, identityManager.getMyEncryptionKey(), identityManager.getDisplayName(), { this }) {
                 synchronized(activeClients) {
                     activeClients.remove(deviceAddress)
                 }
@@ -192,6 +193,18 @@ class MeshNetworkManager(
         scope.launch {
             activeClients.values.forEach { it.sendData(json) }
             gattServer.broadcastData(json)
+        }
+    }
+
+    fun forwardToOthers(message: Message, excludeAddress: String?) {
+        val json = protocol.serializeMessage(message)
+        scope.launch {
+            activeClients.forEach { (address, client) ->
+                if (address != excludeAddress) {
+                    client.sendData(json)
+                }
+            }
+            gattServer.broadcastData(json, excludeAddress)
         }
     }
 }
