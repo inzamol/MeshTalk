@@ -107,7 +107,8 @@ fun ChatPane(
                 MessageBubble(
                     message = message,
                     isMine = message.senderId == myId,
-                    onLongClick = { messageToDelete = message }
+                    onLongClick = { messageToDelete = message },
+                    onRetryClick = { viewModel.retryMessage(message) }
                 )
             }
         }
@@ -137,7 +138,12 @@ fun ChatPane(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MessageBubble(message: Message, isMine: Boolean, onLongClick: () -> Unit) {
+fun MessageBubble(
+    message: Message, 
+    isMine: Boolean, 
+    onLongClick: () -> Unit,
+    onRetryClick: () -> Unit
+) {
     val alignment = if (isMine) Alignment.CenterEnd else Alignment.CenterStart
     val containerColor = if (isMine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
     val contentColor = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
@@ -156,7 +162,11 @@ fun MessageBubble(message: Message, isMine: Boolean, onLongClick: () -> Unit) {
             modifier = Modifier
                 .padding(vertical = 4.dp, horizontal = 8.dp)
                 .combinedClickable(
-                    onClick = {},
+                    onClick = {
+                        if (message.status == MessageStatus.FAILED) {
+                            onRetryClick()
+                        }
+                    },
                     onLongClick = onLongClick
                 )
         ) {
@@ -169,6 +179,13 @@ fun MessageBubble(message: Message, isMine: Boolean, onLongClick: () -> Unit) {
                     modifier = Modifier.align(Alignment.End),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (message.status == MessageStatus.FAILED) {
+                        Text(
+                            "FAILED ",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                     Text(
                         text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp)),
                         style = MaterialTheme.typography.labelSmall,

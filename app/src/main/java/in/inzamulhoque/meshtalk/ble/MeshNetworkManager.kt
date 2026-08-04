@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 class MeshNetworkManager(
     private val context: Context,
@@ -58,6 +59,7 @@ class MeshNetworkManager(
     private val activeClients = mutableMapOf<String, MeshGattClient>()
     private val connectionCooldowns = mutableMapOf<String, Long>()
     private var autoReconnectJob: kotlinx.coroutines.Job? = null
+    private var timeoutCheckJob: kotlinx.coroutines.Job? = null
 
     fun start() {
         Log.d("MeshNetworkManager", "Starting MeshNetworkManager. myIdHash: ${String(myShortId)}")
@@ -68,6 +70,18 @@ class MeshNetworkManager(
             bleManager?.startScanning()
             gattServer.start()
             startAutoReconnectLoop()
+            startTimeoutCheckLoop()
+        }
+    }
+
+    private fun startTimeoutCheckLoop() {
+        timeoutCheckJob?.cancel()
+        timeoutCheckJob = scope.launch {
+            while (true) {
+                delay(30000.milliseconds) // Check every 30 seconds
+                val threshold = System.currentTimeMillis() - 5 * 60 * 1000 // 5 minutes
+                database.messageDao().markTimedOutMessagesAsFailed(threshold)
+            }
         }
     }
 

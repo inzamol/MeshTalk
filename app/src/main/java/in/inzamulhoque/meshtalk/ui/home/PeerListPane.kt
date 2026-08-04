@@ -73,7 +73,7 @@ fun PeerListPane(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                items(peers, key = { it.id }) { peer ->
+                items(peers, key = { it.deviceAddress ?: it.id }) { peer ->
                     PeerItem(
                         peer = peer, 
                         onClick = { onPeerClick(peer.id) },
@@ -127,14 +127,23 @@ fun PeerItem(peer: Peer, onClick: () -> Unit, onLongClick: () -> Unit) {
             Text(statusText) 
         },
         leadingContent = {
-            Icon(
-                Icons.Rounded.Person, 
-                contentDescription = null,
-                tint = if (isHandshaked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-            )
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Rounded.Person, 
+                    contentDescription = null,
+                    tint = if (isHandshaked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                )
+                if (!isHandshaked) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(32.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         },
         modifier = Modifier
-            .alpha(if (isHandshaked) 1f else 0.7f)
+            .alpha(if (isHandshaked) 1f else 1f) // Keep full alpha to see the indicator clearly
             .combinedClickable(
                 onClick = { if (isHandshaked) onClick() },
                 onLongClick = onLongClick

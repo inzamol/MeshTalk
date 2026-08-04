@@ -1,5 +1,6 @@
 package `in`.inzamulhoque.meshtalk.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
@@ -35,6 +36,12 @@ fun MainScreen(
     val scaffoldDirective = calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
     val navigator = rememberListDetailPaneScaffoldNavigator<NavRoute>(scaffoldDirective)
     val coroutineScope = rememberCoroutineScope()
+
+    BackHandler(navigator.canNavigateBack()) {
+        coroutineScope.launch {
+            navigator.navigateBack()
+        }
+    }
 
     LaunchedEffect(initialPeerId) {
         if (initialPeerId != null) {

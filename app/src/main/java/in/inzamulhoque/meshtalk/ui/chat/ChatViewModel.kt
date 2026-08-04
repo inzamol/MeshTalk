@@ -98,6 +98,17 @@ class ChatViewModel(
         }
     }
 
+    fun retryMessage(message: Message) {
+        viewModelScope.launch {
+            val updatedMessage = message.copy(
+                timestamp = System.currentTimeMillis(),
+                status = MessageStatus.PENDING
+            )
+            messageDao.insertMessage(updatedMessage)
+            meshNetworkManager.broadcastMessage(updatedMessage)
+        }
+    }
+
     fun deleteMessage(message: Message) {
         viewModelScope.launch {
             messageDao.deleteMessage(message)
