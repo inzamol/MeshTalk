@@ -18,6 +18,6 @@ interface GroupDao {
     @Delete
     suspend fun deleteGroup(group: Group)
 
-    @Query("SELECT * FROM chat_groups WHERE memberIds LIKE :peerId")
+    @Query("SELECT * FROM chat_groups WHERE memberIds LIKE '%' || :peerId || '%'")
     suspend fun getGroupsForPeer(peerId: String): List<Group>
 }

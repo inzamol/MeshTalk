@@ -1,8 +1,10 @@
 package `in`.inzamulhoque.meshtalk.data.local.entity
 
+import androidx.annotation.Keep
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+@Keep
 @Entity(tableName = "peers")
 data class Peer(
     @PrimaryKey val id: String, // Likely the public key or a hash of it
