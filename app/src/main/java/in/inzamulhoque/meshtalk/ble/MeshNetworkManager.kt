@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 class MeshNetworkManager(
     private val context: Context,
@@ -78,8 +79,8 @@ class MeshNetworkManager(
         timeoutCheckJob?.cancel()
         timeoutCheckJob = scope.launch {
             while (true) {
-                delay(30000.milliseconds) // Check every 30 seconds
-                val threshold = System.currentTimeMillis() - 5 * 60 * 1000 // 5 minutes
+                delay(30.seconds) 
+                val threshold = System.currentTimeMillis() - 5 * 60 * 1000
                 database.messageDao().markTimedOutMessagesAsFailed(threshold)
             }
         }
@@ -89,11 +90,11 @@ class MeshNetworkManager(
         autoReconnectJob?.cancel()
         autoReconnectJob = scope.launch {
             while (true) {
-                delay(10000)
+                delay(15.seconds)
                 val peers = database.peerDao().getAllPeersSync()
                 val now = System.currentTimeMillis()
                 peers.forEach { peer ->
-                    if (peer.deviceAddress != null && now - peer.lastSeen < 60000) {
+                    if (peer.deviceAddress != null && now - peer.lastSeen < 45000) {
                         if (!activeClients.containsKey(peer.deviceAddress)) {
                             if (identityManager.getMyId() < peer.id) {
                                 connectToPeer(peer.deviceAddress)
@@ -107,6 +108,7 @@ class MeshNetworkManager(
 
     fun stop() {
         autoReconnectJob?.cancel()
+        timeoutCheckJob?.cancel()
         bleManager?.stopAdvertising()
         bleManager?.stopScanning()
         gattServer.stop()
@@ -130,35 +132,42 @@ class MeshNetworkManager(
 
             if (existing == null) {
                 protocol.onPeerDiscovered(deviceAddress, "", null, "Connecting...", deviceAddress)
-            } else {
-                if (now - existing.lastSeen > 10000) {
-                    database.peerDao().updatePeer(existing.copy(lastSeen = now))
-                }
+            } else if (now - existing.lastSeen > 10000) {
+                database.peerDao().updatePeer(existing.copy(lastSeen = now))
             }
             
             val myIdHash = java.lang.Long.parseLong(String(myShortId), 16)
-            val peerIdHash = try { java.lang.Long.parseLong(String(peerShortId), 16) } catch (e: Exception) { 0L }
+            val peerIdHash = try { 
+                if (peerShortId.isNotEmpty()) java.lang.Long.parseLong(String(peerShortId), 16) 
+                else java.lang.Long.parseLong(deviceAddress.replace(":", ""), 16)
+            } catch (e: Exception) { 0L }
             
-            if (peerIdHash != 0L && myIdHash < peerIdHash) {
-                connectToPeer(deviceAddress)
-            } else if (peerIdHash == 0L) {
+            if (myIdHash < peerIdHash) {
                 connectToPeer(deviceAddress)
             }
         }
     }
 
     fun connectToPeer(deviceAddress: String, force: Boolean = false) {
-        if (activeClients.containsKey(deviceAddress)) return
-        val now = System.currentTimeMillis()
-        if (!force && now - (connectionCooldowns[deviceAddress] ?: 0) < 30000) return
-        
-        val device = bluetoothAdapter?.getRemoteDevice(deviceAddress) ?: return
-        connectionCooldowns[deviceAddress] = now
-        val client = MeshGattClient(context, device, protocol, identityManager.getMyEncryptionKey(), identityManager.getDisplayName()) {
-            activeClients.remove(deviceAddress)
+        synchronized(activeClients) {
+            if (activeClients.containsKey(deviceAddress)) return
+            
+            val lastConnect = connectionCooldowns[deviceAddress] ?: 0
+            val now = System.currentTimeMillis()
+            if (!force && now - lastConnect < 20000) return 
+
+            val device = bluetoothAdapter?.getRemoteDevice(deviceAddress) ?: return
+            connectionCooldowns[deviceAddress] = now
+            
+            Log.d("MeshNetworkManager", "Initiating GATT client connection to $deviceAddress")
+            val client = MeshGattClient(context, device, protocol, identityManager.getMyEncryptionKey(), identityManager.getDisplayName()) {
+                synchronized(activeClients) {
+                    activeClients.remove(deviceAddress)
+                }
+            }
+            activeClients[deviceAddress] = client
+            client.connect()
         }
-        activeClients[deviceAddress] = client
-        client.connect()
     }
 
     fun broadcastMessage(message: Message) {
