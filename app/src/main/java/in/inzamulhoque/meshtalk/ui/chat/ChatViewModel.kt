@@ -14,6 +14,14 @@ import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+import android.net.Uri
+import android.util.Base64
+import `in`.inzamulhoque.meshtalk.data.local.entity.MessageType
+import java.io.InputStream
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import java.io.ByteArrayOutputStream
+
 class ChatViewModel(
     application: Application,
     private val meshNetworkManager: MeshNetworkManager,
@@ -57,7 +65,6 @@ class ChatViewModel(
                     try {
                         msg.copy(content = identityManager.decryptMessage(msg.content), isEncrypted = false)
                     } catch (e: Exception) {
-                        ToastHelper.showToast(getApplication(), "Failed to decrypt message from peer")
                         msg.copy(content = "[Decryption Failed]")
                     }
                 } else {
@@ -89,12 +96,69 @@ class ChatViewModel(
                 content = finalContent,
                 localPlaintext = content, // Store the original text locally
                 isEncrypted = encryptionKey != null,
-                status = MessageStatus.PENDING // Start as PENDING
+                status = MessageStatus.PENDING, // Start as PENDING
+                type = MessageType.TEXT
             )
             val msgId = messageDao.insertMessage(message)
             val savedMsg = message.copy(id = msgId)
             
             meshNetworkManager.broadcastMessage(savedMsg)
+        }
+    }
+
+    fun sendImage(uri: Uri) {
+        viewModelScope.launch {
+            val base64 = compressAndEncodeImage(uri) ?: return@launch
+            val peerEntity = peerDao.getPeerById(peerId)
+            val encryptionKey = peerEntity?.encryptionKey ?: peerEntity?.publicKey
+
+            val finalContent = if (encryptionKey != null) {
+                try {
+                    identityManager.encryptMessage(base64, encryptionKey)
+                } catch (e: Exception) {
+                    base64
+                }
+            } else {
+                base64
+            }
+
+            val message = Message(
+                senderId = myId,
+                receiverId = peerId,
+                content = finalContent,
+                localPlaintext = uri.toString(), // Store local URI for display
+                isEncrypted = encryptionKey != null,
+                status = MessageStatus.PENDING,
+                type = MessageType.IMAGE,
+                mediaUri = uri.toString()
+            )
+            val msgId = messageDao.insertMessage(message)
+            meshNetworkManager.broadcastMessage(message.copy(id = msgId))
+        }
+    }
+
+    private fun compressAndEncodeImage(uri: Uri): String? {
+        return try {
+            val inputStream: InputStream? = getApplication<Application>().contentResolver.openInputStream(uri)
+            val originalBitmap = BitmapFactory.decodeStream(inputStream)
+            
+            // Resize for mesh transport (max 400px width/height)
+            val ratio = Math.min(400.0 / originalBitmap.width, 400.0 / originalBitmap.height).coerceAtMost(1.0)
+            val resized = if (ratio < 1.0) {
+                Bitmap.createScaledBitmap(
+                    originalBitmap,
+                    (originalBitmap.width * ratio).toInt(),
+                    (originalBitmap.height * ratio).toInt(),
+                    true
+                )
+            } else originalBitmap
+
+            val outputStream = ByteArrayOutputStream()
+            resized.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
+            val bytes = outputStream.toByteArray()
+            Base64.encodeToString(bytes, Base64.DEFAULT)
+        } catch (e: Exception) {
+            null
         }
     }
 
