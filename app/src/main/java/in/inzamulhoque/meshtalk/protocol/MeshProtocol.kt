@@ -17,31 +17,37 @@ class MeshProtocol(
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val messageAdapter = moshi.adapter(Message::class.java)
 
-    suspend fun onPeerDiscovered(peerId: String, publicKey: String, encryptionKey: String?, deviceAddress: String?) {
+    suspend fun onPeerDiscovered(peerId: String, publicKey: String, encryptionKey: String?, displayName: String?, deviceAddress: String?) {
         val existingPeer = peerDao.getPeerById(peerId)
         if (existingPeer == null) {
-            Log.d("MeshProtocol", "New peer discovered: $peerId")
-            peerDao.insertPeer(Peer(peerId, publicKey, encryptionKey, null, deviceAddress, System.currentTimeMillis()))
+            Log.d("MeshProtocol", "New peer discovered: $peerId ($displayName)")
+            peerDao.insertPeer(Peer(peerId, publicKey, encryptionKey, displayName, deviceAddress, System.currentTimeMillis()))
         } else {
             Log.d("MeshProtocol", "Existing peer seen: $peerId")
             peerDao.updatePeer(existingPeer.copy(
                 lastSeen = System.currentTimeMillis(), 
                 deviceAddress = deviceAddress,
-                encryptionKey = encryptionKey ?: existingPeer.encryptionKey
+                encryptionKey = encryptionKey ?: existingPeer.encryptionKey,
+                displayName = displayName ?: existingPeer.displayName
             ))
         }
     }
 
-    suspend fun getInventory(): List<Long> {
-        return messageDao.getAllMessageIds()
+    suspend fun getInventory(): List<String> {
+        return messageDao.getAllMessageUuids().takeLast(20)
     }
 
-    suspend fun getMessagesToSync(remoteInventory: List<Long>): List<Message> {
+    suspend fun getMessagesToSync(remoteInventory: List<String>): List<Message> {
         val messagesToForward = messageDao.getMessagesToForward(myId, System.currentTimeMillis())
-        return messagesToForward.filter { !remoteInventory.contains(it.id) }
+        return messagesToForward.filter { !remoteInventory.contains(it.uuid) }
     }
 
     suspend fun processReceivedMessage(message: Message) {
+        if (messageDao.getMessageByUuid(message.uuid) != null) {
+            Log.d("MeshProtocol", "Message ${message.uuid} already exists, skipping")
+            return
+        }
+
         if (message.receiverId == myId) {
             Log.d("MeshProtocol", "Received message for me from ${message.senderId}")
             messageDao.insertMessage(message.copy(id = 0, status = MessageStatus.DELIVERED))
@@ -57,8 +63,20 @@ class MeshProtocol(
         }
     }
 
-    fun serializeMessage(message: Message): String = messageAdapter.toJson(message)
-    fun deserializeMessage(json: String): Message? = messageAdapter.fromJson(json)
+    fun serializeMessage(message: Message): String {
+        // Exclude localPlaintext when sending over the mesh to save space and privacy
+        val cleanMessage = message.copy(localPlaintext = null)
+        return messageAdapter.toJson(cleanMessage)
+    }
+
+    fun deserializeMessage(json: String): Message? {
+        return try {
+            messageAdapter.fromJson(json)
+        } catch (e: Exception) {
+            Log.e("MeshProtocol", "Deserialization error", e)
+            null
+        }
+    }
 
     companion object {
         private const val MAX_HOPS = 10

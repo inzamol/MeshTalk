@@ -1,11 +1,23 @@
 package `in`.inzamulhoque.meshtalk.crypto
 
+import android.bluetooth.BluetoothAdapter
 import android.util.Base64
 
 class IdentityManager(private val cryptoManager: CryptoManager) {
     
     fun getMyId(): String {
         return Base64.encodeToString(cryptoManager.getPublicKey(), Base64.NO_WRAP)
+    }
+
+    fun getDisplayName(): String {
+        return try {
+            val name = BluetoothAdapter.getDefaultAdapter()?.name
+            if (name.isNullOrBlank()) "Mesh Device" else name
+        } catch (e: SecurityException) {
+            "Restricted Device"
+        } catch (e: Exception) {
+            "Unknown Device"
+        }
     }
 
     fun getMyEncryptionKey(): String {

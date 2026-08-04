@@ -26,11 +26,9 @@ fun PeerListPane(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar(
-                title = { Text("Mesh Talk") },
-                windowInsets = WindowInsets(0)
+                title = { Text("Mesh Talk") }
             )
         }
     ) { innerPadding ->

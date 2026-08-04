@@ -29,12 +29,10 @@ fun ChatPane(
     var text by remember { mutableStateOf("") }
 
     Scaffold(
-        modifier = modifier.fillMaxSize(),
-        contentWindowInsets = WindowInsets(0),
+        modifier = modifier.fillMaxSize().imePadding(),
         topBar = {
             TopAppBar(
                 title = { Text(peer?.displayName ?: "Chat") },
-                windowInsets = WindowInsets(0),
                 navigationIcon = {
                     if (!isTwoPane) {
                         IconButton(onClick = onBack) {
@@ -46,8 +44,7 @@ fun ChatPane(
         },
         bottomBar = {
             BottomAppBar(
-                contentPadding = PaddingValues(horizontal = 8.dp),
-                windowInsets = WindowInsets(0)
+                contentPadding = PaddingValues(horizontal = 8.dp)
             ) {
                 TextField(
                     value = text,

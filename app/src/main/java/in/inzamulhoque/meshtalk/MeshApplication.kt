@@ -20,7 +20,8 @@ class MeshApplication : Application() {
             applicationContext,
             AppDatabase::class.java,
             "meshtalk_db"
-        ).build()
+        ).fallbackToDestructiveMigration()
+            .build()
         cryptoManager = CryptoManager(this)
         identityManager = IdentityManager(cryptoManager)
     }

@@ -30,12 +30,16 @@ class MeshBLEManager(
             .build()
 
         val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(true)
+            .setIncludeDeviceName(false) // Keep main packet small for 128-bit UUID
             .addServiceUuid(ParcelUuid(MeshConstants.SERVICE_UUID))
             .build()
 
+        val scanResponse = AdvertiseData.Builder()
+            .setIncludeDeviceName(true)
+            .build()
+
         try {
-            advertiser.startAdvertising(settings, data, advertiseCallback)
+            advertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
             isAdvertising = true
         } catch (e: SecurityException) {
             Log.e("MeshBLEManager", "Permission denied for advertising", e)

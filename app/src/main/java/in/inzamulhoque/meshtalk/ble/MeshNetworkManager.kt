@@ -9,7 +9,6 @@ import `in`.inzamulhoque.meshtalk.data.local.AppDatabase
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 class MeshNetworkManager(
     private val context: Context,
@@ -36,7 +35,8 @@ class MeshNetworkManager(
         bluetoothManager,
         protocol,
         identityManager.getMyId(),
-        identityManager.getMyEncryptionKey()
+        identityManager.getMyEncryptionKey(),
+        identityManager.getDisplayName()
     )
 
     private val scope = CoroutineScope(Dispatchers.IO)

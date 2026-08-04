@@ -24,6 +24,12 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE receiverId = :receiverId")
     suspend fun getMessagesForReceiver(receiverId: String): List<Message>
 
+    @Query("SELECT uuid FROM messages")
+    suspend fun getAllMessageUuids(): List<String>
+
+    @Query("SELECT * FROM messages WHERE uuid = :uuid LIMIT 1")
+    suspend fun getMessageByUuid(uuid: String): Message?
+
     @Query("SELECT id FROM messages")
     suspend fun getAllMessageIds(): List<Long>
 }

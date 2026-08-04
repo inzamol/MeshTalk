@@ -25,18 +25,15 @@ class ChatViewModel(
     val messages: StateFlow<List<Message>> = messageDao.getMessagesForPeer(peerId)
         .map { list ->
             list.map { msg ->
-                if (msg.isEncrypted && msg.receiverId == myId) {
+                if (msg.senderId == myId && msg.localPlaintext != null) {
+                    // Always prefer local plaintext for our own sent messages
+                    msg.copy(content = msg.localPlaintext, isEncrypted = false)
+                } else if (msg.isEncrypted && msg.receiverId == myId) {
                     try {
                         msg.copy(content = identityManager.decryptMessage(msg.content), isEncrypted = false)
                     } catch (e: Exception) {
                         msg.copy(content = "[Decryption Failed]")
                     }
-                } else if (msg.isEncrypted && msg.senderId == myId) {
-                    // We sent it, maybe we should have stored the plaintext locally?
-                    // For now, let's just show it. Ideally we store plaintext for 'sent' messages or re-decrypt if we have a way.
-                    // But we don't have the peer's private key, so we can't decrypt what we encrypted for them.
-                    // Usually we store the plaintext locally and only encrypt for the mesh.
-                    msg
                 } else {
                     msg
                 }
@@ -63,6 +60,7 @@ class ChatViewModel(
                 senderId = myId,
                 receiverId = peerId,
                 content = finalContent,
+                localPlaintext = content, // Store the original text locally
                 isEncrypted = encryptionKey != null,
                 status = MessageStatus.SENT
             )
