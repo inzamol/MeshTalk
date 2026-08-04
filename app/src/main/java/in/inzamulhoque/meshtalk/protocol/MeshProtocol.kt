@@ -88,7 +88,8 @@ class MeshProtocol(
         displayName: String?, 
         deviceAddress: String?,
         bio: String? = null,
-        avatarBase64: String? = null
+        avatarBase64: String? = null,
+        rssi: Int = -100
     ) {
         val allPeers = peerDao.getAllPeersSync()
         
@@ -122,7 +123,8 @@ class MeshProtocol(
                 deviceAddress = deviceAddress, 
                 lastSeen = System.currentTimeMillis(),
                 bio = bio,
-                avatarUri = avatarBase64 // Store base64 in avatarUri for now
+                avatarUri = avatarBase64, // Store base64 in avatarUri for now
+                rssi = rssi
             ))
         } else {
             peerDao.updatePeer(existingPeer.copy(
@@ -132,7 +134,8 @@ class MeshProtocol(
                 displayName = displayName ?: existingPeer.displayName,
                 publicKey = if (publicKey.isNotEmpty()) publicKey else existingPeer.publicKey,
                 bio = bio ?: existingPeer.bio,
-                avatarUri = avatarBase64 ?: existingPeer.avatarUri
+                avatarUri = avatarBase64 ?: existingPeer.avatarUri,
+                rssi = rssi
             ))
         }
     }
@@ -152,10 +155,10 @@ class MeshProtocol(
         }
 
         // Check if it's for me (Direct or Group)
-        val isForMe = message.receiverId == myId || (message.groupId != null && isMemberOf(message.groupId))
+        val isForMe = message.receiverId == myId || (message.groupId != null && (message.groupId == PUBLIC_GROUP_ID || isMemberOf(message.groupId)))
 
         if (isForMe) {
-            val decryptedContent = if (message.isEncrypted) {
+            val decryptedContent = if (message.isEncrypted && message.groupId != PUBLIC_GROUP_ID) {
                 try {
                     // For group messages, we would ideally use a group key.
                     // For now, we'll assume group messages are unencrypted or handled differently.
@@ -232,5 +235,6 @@ class MeshProtocol(
 
     companion object {
         private const val MAX_HOPS = 10
+        const val PUBLIC_GROUP_ID = "shout_channel"
     }
 }

@@ -22,6 +22,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import java.io.ByteArrayOutputStream
 
+import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+
 class ChatViewModel(
     application: Application,
     private val meshNetworkManager: MeshNetworkManager,
@@ -39,8 +41,11 @@ class ChatViewModel(
     val peer: StateFlow<Peer?> = peerDao.getPeerFlowById(peerId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    val messages: StateFlow<List<Message>> = messageDao.getMessagesForPeer(peerId)
-        .onEach { list ->
+    val messages: StateFlow<List<Message>> = (if (peerId == MeshProtocol.PUBLIC_GROUP_ID) {
+        messageDao.getMessagesForGroup(peerId)
+    } else {
+        messageDao.getMessagesForPeer(peerId)
+    }).onEach { list ->
             // Mark unread incoming messages as READ
             val unread = list.filter { it.receiverId == myId && it.status != MessageStatus.READ }
             if (unread.isNotEmpty()) {
@@ -76,8 +81,9 @@ class ChatViewModel(
 
     fun sendMessage(content: String) {
         viewModelScope.launch {
-            val peerEntity = peerDao.getPeerById(peerId)
-            val encryptionKey = peerEntity?.encryptionKey ?: peerEntity?.publicKey // Fallback to publicKey if available
+            val isPublic = peerId == MeshProtocol.PUBLIC_GROUP_ID
+            val peerEntity = if (!isPublic) peerDao.getPeerById(peerId) else null
+            val encryptionKey = if (isPublic) null else (peerEntity?.encryptionKey ?: peerEntity?.publicKey)
             
             val finalContent = if (encryptionKey != null) {
                 try {
@@ -92,7 +98,8 @@ class ChatViewModel(
 
             val message = Message(
                 senderId = myId,
-                receiverId = peerId,
+                receiverId = if (isPublic) "" else peerId,
+                groupId = if (isPublic) MeshProtocol.PUBLIC_GROUP_ID else null,
                 content = finalContent,
                 localPlaintext = content, // Store the original text locally
                 isEncrypted = encryptionKey != null,

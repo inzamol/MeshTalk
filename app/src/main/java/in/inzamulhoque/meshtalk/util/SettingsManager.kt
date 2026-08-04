@@ -29,4 +29,8 @@ class SettingsManager(context: Context) {
     var avatarBase64: String?
         get() = prefs.getString("user_avatar", null)
         set(value) = prefs.edit().putString("user_avatar", value).apply()
+
+    var isContinuousSearchEnabled: Boolean
+        get() = prefs.getBoolean("continuous_search_enabled", true)
+        set(value) = prefs.edit().putBoolean("continuous_search_enabled", value).apply()
 }

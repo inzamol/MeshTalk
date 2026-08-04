@@ -19,4 +19,8 @@ sealed interface NavRoute : NavKey, Parcelable {
     @Serializable
     @Parcelize
     data object Settings : NavRoute
+
+    @Serializable
+    @Parcelize
+    data object CreateGroup : NavRoute
 }
