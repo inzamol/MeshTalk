@@ -11,7 +11,8 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(
     private val database: AppDatabase,
     private val settingsManager: SettingsManager,
-    private val identityManager: `in`.inzamulhoque.meshtalk.crypto.IdentityManager
+    private val identityManager: `in`.inzamulhoque.meshtalk.crypto.IdentityManager,
+    private val meshNetworkManager: `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager
 ) : ViewModel() {
 
     val myId = identityManager.getMyId()
@@ -70,6 +71,7 @@ class SettingsViewModel(
     fun setContinuousSearchEnabled(enabled: Boolean) {
         settingsManager.isContinuousSearchEnabled = enabled
         _continuousSearchEnabled.value = enabled
+        meshNetworkManager.updateScanningState()
     }
 
     fun deleteAllMessages() {

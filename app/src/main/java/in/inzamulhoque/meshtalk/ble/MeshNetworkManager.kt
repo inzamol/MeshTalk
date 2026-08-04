@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.util.Log
 import `in`.inzamulhoque.meshtalk.crypto.IdentityManager
+import `in`.inzamulhoque.meshtalk.util.SettingsManager
 import `in`.inzamulhoque.meshtalk.data.local.AppDatabase
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
 import `in`.inzamulhoque.meshtalk.data.local.entity.Message
@@ -19,7 +20,8 @@ import kotlin.time.Duration.Companion.seconds
 class MeshNetworkManager(
     private val context: Context,
     private val database: AppDatabase,
-    private val identityManager: IdentityManager
+    private val identityManager: IdentityManager,
+    private val settingsManager: SettingsManager
 ) {
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
@@ -31,7 +33,7 @@ class MeshNetworkManager(
         peerDao = database.peerDao(),
         groupDao = database.groupDao(),
         identityManager = identityManager,
-        settingsManager = (context.applicationContext as `in`.inzamulhoque.meshtalk.MeshApplication).settingsManager
+        settingsManager = settingsManager
     )
 
     private val myShortId = String.format("%08x", identityManager.getMyId().hashCode()).toByteArray()
@@ -69,8 +71,7 @@ class MeshNetworkManager(
         
         if (bluetoothAdapter?.isEnabled == true) {
             bleManager?.startAdvertising()
-            val settings = (context.applicationContext as `in`.inzamulhoque.meshtalk.MeshApplication).settingsManager
-            if (settings.isContinuousSearchEnabled) {
+            if (settingsManager.isContinuousSearchEnabled) {
                 bleManager?.startScanning()
             }
             gattServer.start()
@@ -83,11 +84,18 @@ class MeshNetworkManager(
         scope.launch {
             Log.d("MeshNetworkManager", "Manual search refresh triggered")
             bleManager?.startScanning()
-            delay(10000) // Scan for 10 seconds
-            val settings = (context.applicationContext as `in`.inzamulhoque.meshtalk.MeshApplication).settingsManager
-            if (!settings.isContinuousSearchEnabled) {
+            delay(10.seconds) 
+            if (!settingsManager.isContinuousSearchEnabled) {
                 bleManager?.stopScanning()
             }
+        }
+    }
+
+    fun updateScanningState() {
+        if (settingsManager.isContinuousSearchEnabled) {
+            bleManager?.startScanning()
+        } else {
+            bleManager?.stopScanning()
         }
     }
 

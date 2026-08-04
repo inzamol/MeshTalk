@@ -12,6 +12,7 @@ import `in`.inzamulhoque.meshtalk.util.SettingsManager
 import `in`.inzamulhoque.meshtalk.crypto.IdentityManager
 import android.content.Context
 import android.util.Log
+import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -25,9 +26,9 @@ data class SyncUpdate(
 )
 
 enum class SyncUpdateType {
-    DELETE_MESSAGE,
-    DELIVERED,
-    READ
+    @Json(name = "DELETE_MESSAGE") DELETE_MESSAGE,
+    @Json(name = "DELIVERED") DELIVERED,
+    @Json(name = "READ") READ
 }
 
 

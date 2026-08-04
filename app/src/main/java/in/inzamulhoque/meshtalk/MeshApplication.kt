@@ -37,7 +37,7 @@ class MeshApplication : Application() {
         settingsManager = SettingsManager(this)
         cryptoManager = CryptoManager(this)
         identityManager = IdentityManager(cryptoManager, settingsManager)
-        meshNetworkManager = MeshNetworkManager(this, database, identityManager)
+        meshNetworkManager = MeshNetworkManager(this, database, identityManager, settingsManager)
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {

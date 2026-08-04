@@ -23,3 +23,15 @@
 -keep class * extends androidx.room.RoomDatabase
 -keep class * extends androidx.room.Dao
 -keep class * extends androidx.room.Entity
+
+# Keep all data models and their members for Moshi/Room/Serialization
+-keep class in.inzamulhoque.meshtalk.data.local.entity.** { *; }
+-keepclassmembers class in.inzamulhoque.meshtalk.data.local.entity.** { *; }
+
+# Keep all Enums and their members strictly
+-keepclassmembers enum * { *; }
+-keep enum in.inzamulhoque.meshtalk.** { *; }
+
+# Keep Handshake and other protocol DTOs
+-keep class in.inzamulhoque.meshtalk.protocol.** { *; }
+-keepclassmembers class in.inzamulhoque.meshtalk.protocol.** { *; }

@@ -44,9 +44,16 @@ data class Message(
 )
 
 enum class MessageStatus {
-    PENDING, SENT, DELIVERED, READ, FAILED, CARRYING
+    @Json(name = "PENDING") PENDING,
+    @Json(name = "SENT") SENT,
+    @Json(name = "DELIVERED") DELIVERED,
+    @Json(name = "READ") READ,
+    @Json(name = "FAILED") FAILED,
+    @Json(name = "CARRYING") CARRYING
 }
 
 enum class MessageType {
-    TEXT, IMAGE, FILE
+    @Json(name = "TEXT") TEXT,
+    @Json(name = "IMAGE") IMAGE,
+    @Json(name = "FILE") FILE
 }
