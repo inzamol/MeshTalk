@@ -126,7 +126,8 @@ fun MainScreen(
                                     return SettingsViewModel(
                                         database = app.database,
                                         settingsManager = app.settingsManager,
-                                        identityManager = app.identityManager
+                                        identityManager = app.identityManager,
+                                        meshNetworkManager = app.meshNetworkManager
                                     ) as T
                                 }
                             }

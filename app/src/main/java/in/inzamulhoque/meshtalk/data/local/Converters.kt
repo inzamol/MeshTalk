@@ -7,8 +7,10 @@ import com.squareup.moshi.Types
 import `in`.inzamulhoque.meshtalk.data.local.entity.MessageStatus
 import `in`.inzamulhoque.meshtalk.data.local.entity.MessageType
 
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+
 class Converters {
-    private val moshi = Moshi.Builder().build()
+    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val listType = Types.newParameterizedType(List::class.java, String::class.java)
     private val listAdapter: JsonAdapter<List<String>> = moshi.adapter(listType)
 

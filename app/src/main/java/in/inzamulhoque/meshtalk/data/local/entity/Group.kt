@@ -5,7 +5,7 @@ import androidx.room.PrimaryKey
 import com.squareup.moshi.JsonClass
 import java.util.UUID
 
-@Entity(tableName = "groups")
+@Entity(tableName = "chat_groups")
 @JsonClass(generateAdapter = true)
 data class Group(
     @PrimaryKey val groupId: String = UUID.randomUUID().toString(),

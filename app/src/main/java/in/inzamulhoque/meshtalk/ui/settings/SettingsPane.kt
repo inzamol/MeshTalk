@@ -26,6 +26,8 @@ import androidx.compose.ui.draw.clip
 
 import `in`.inzamulhoque.meshtalk.util.QRUtils
 
+import androidx.camera.core.ExperimentalGetImage
+
 @androidx.camera.core.ExperimentalGetImage
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

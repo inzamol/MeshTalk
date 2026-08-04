@@ -91,10 +91,12 @@ Mesh Talk uses modern Android development practices:
 ---
 
 ## 🗺️ Roadmap
-- [ ] Multi-hop mesh routing (forwarding messages through intermediate peers).
-- [ ] Image and file sharing support.
-- [ ] Group chat capabilities.
-- [ ] Custom user profiles and avatars.
+- [x] Multi-hop mesh routing (forwarding messages through intermediate peers).
+- [x] Image and file sharing support.
+- [x] Group chat capabilities.
+- [x] Custom user profiles and avatars.
+- [ ] SOS & Location sharing.
+- [ ] Offline maps.
 
 ---
 

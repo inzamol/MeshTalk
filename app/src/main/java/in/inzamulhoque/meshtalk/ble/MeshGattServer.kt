@@ -131,7 +131,7 @@ class MeshGattServer(
                 when (characteristic?.uuid) {
                     MeshConstants.IDENTITY_CHAR_UUID -> gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, myId.toByteArray().let { if (offset < it.size) it.copyOfRange(offset, it.size) else byteArrayOf() })
                     MeshConstants.ENCRYPTION_KEY_CHAR_UUID -> gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, myEncryptionKey.toByteArray().let { if (offset < it.size) it.copyOfRange(offset, it.size) else byteArrayOf() })
-                    MeshConstants.DISPLAY_NAME_CHAR_UUID -> gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, displayNameProvider().toByteArray().let { if (offset < it.size) it.copyOfRange(offset, it.size) else byteArrayOf() })
+                    MeshConstants.DISPLAY_NAME_CHAR_UUID -> gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, (displayNameProvider() ?: "Unknown").toByteArray().let { if (offset < it.size) it.copyOfRange(offset, it.size) else byteArrayOf() })
                     MeshConstants.INVENTORY_CHAR_UUID -> scope.launch {
                         val inv = protocol.getInventory().joinToString(",").toByteArray()
                         gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, if (offset < inv.size) inv.copyOfRange(offset, inv.size) else byteArrayOf())
