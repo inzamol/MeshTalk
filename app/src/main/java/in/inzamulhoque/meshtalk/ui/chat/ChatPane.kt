@@ -52,7 +52,14 @@ fun ChatPane(
         modifier = modifier.fillMaxSize().imePadding(),
         topBar = {
             TopAppBar(
-                title = { Text(peer?.displayName ?: "Chat") },
+                title = { 
+                    Column {
+                        Text(peer?.displayName ?: "Chat")
+                        if (peer?.id?.contains("-") == true) { // Basic heuristic for group ID
+                             Text("Group Chat", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                },
                 navigationIcon = {
                     if (!isTwoPane) {
                         IconButton(onClick = onBack) {

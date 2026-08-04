@@ -13,7 +13,7 @@ class MeshBLEManager(
     private val context: Context,
     private val bluetoothAdapter: BluetoothAdapter,
     private val myShortId: ByteArray,
-    private val onPeerDiscovered: (String, ByteArray) -> Unit, // deviceAddress, peerShortId
+    private val onPeerDiscovered: (String, ByteArray, Int) -> Unit, // deviceAddress, peerShortId, rssi
 ) {
     private var isScanning = false
     private var isAdvertising = false
@@ -134,8 +134,8 @@ class MeshBLEManager(
             
             if (uuids.contains(serviceUuid)) {
                 val shortId = scanRecord.serviceData[serviceUuid] ?: byteArrayOf()
-                Log.d("MeshBLEManager", "Mesh peer seen: ${result.device.address}")
-                onPeerDiscovered(result.device.address, shortId)
+                Log.d("MeshBLEManager", "Mesh peer seen: ${result.device.address}, RSSI: ${result.rssi}")
+                onPeerDiscovered(result.device.address, shortId, result.rssi)
             }
         }
 

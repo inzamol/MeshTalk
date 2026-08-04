@@ -9,6 +9,9 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE senderId = :peerId OR receiverId = :peerId ORDER BY timestamp ASC")
     fun getMessagesForPeer(peerId: String): Flow<List<Message>>
 
+    @Query("SELECT * FROM messages WHERE groupId = :groupId ORDER BY timestamp ASC")
+    fun getMessagesForGroup(groupId: String): Flow<List<Message>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: Message): Long
 

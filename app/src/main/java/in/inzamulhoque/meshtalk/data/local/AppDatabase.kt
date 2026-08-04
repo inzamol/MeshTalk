@@ -10,7 +10,7 @@ import `in`.inzamulhoque.meshtalk.data.local.entity.Group
 import `in`.inzamulhoque.meshtalk.data.local.entity.Message
 import `in`.inzamulhoque.meshtalk.data.local.entity.Peer
 
-@Database(entities = [Message::class, Peer::class, Group::class], version = 5, exportSchema = false)
+@Database(entities = [Message::class, Peer::class, Group::class], version = 6, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao

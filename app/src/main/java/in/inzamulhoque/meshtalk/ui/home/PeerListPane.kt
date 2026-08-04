@@ -6,10 +6,18 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.GroupAdd
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SignalCellularAlt
+import androidx.compose.material.icons.rounded.SignalCellularAlt1Bar
+import androidx.compose.material.icons.rounded.SignalCellularAlt2Bar
+import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -28,10 +36,14 @@ fun PeerListPane(
     viewModel: HomeViewModel,
     onPeerClick: (String) -> Unit,
     onSettingsClick: () -> Unit,
+    onCreateGroupClick: () -> Unit,
+    onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val peers by viewModel.peers.collectAsState()
     var peerToDelete by remember { mutableStateOf<Peer?>(null) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -44,46 +56,60 @@ fun PeerListPane(
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(onClick = onCreateGroupClick) {
+                Icon(Icons.Rounded.GroupAdd, contentDescription = "Create Group")
+            }
         }
     ) { innerPadding ->
-        if (peers.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(
-                    painter = androidx.compose.ui.res.painterResource(id = `in`.inzamulhoque.meshtalk.R.drawable.ic_mesh_logo),
-                    contentDescription = null,
-                    modifier = Modifier.size(120.dp),
-                    tint = Color.Unspecified
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    "No peers discovered yet.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.outline
-                )
-                Text(
-                    "Searching for nearby Mesh Talk devices...",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                items(peers, key = { it.deviceAddress ?: it.id }) { peer ->
-                    PeerItem(
-                        peer = peer, 
-                        onClick = { onPeerClick(peer.id) },
-                        onLongClick = { peerToDelete = peer }
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                coroutineScope.launch {
+                    isRefreshing = true
+                    onRefresh()
+                    kotlinx.coroutines.delay(2000)
+                    isRefreshing = false
+                }
+            },
+            modifier = Modifier.padding(innerPadding)
+        ) {
+            if (peers.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        painter = androidx.compose.ui.res.painterResource(id = `in`.inzamulhoque.meshtalk.R.drawable.ic_mesh_logo),
+                        contentDescription = null,
+                        modifier = Modifier.size(120.dp),
+                        tint = Color.Unspecified
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "No peers discovered yet.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    Text(
+                        "Pull down to search nearby...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(peers, key = { it.deviceAddress ?: it.id }) { peer ->
+                        PeerItem(
+                            peer = peer, 
+                            onClick = { onPeerClick(peer.id) },
+                            onLongClick = { peerToDelete = peer }
+                        )
+                    }
                 }
             }
         }
@@ -113,6 +139,8 @@ fun PeerListPane(
 
 
 
+
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PeerItem(peer: Peer, onClick: () -> Unit, onLongClick: () -> Unit) {
@@ -120,10 +148,35 @@ fun PeerItem(peer: Peer, onClick: () -> Unit, onLongClick: () -> Unit) {
     
     ListItem(
         headlineContent = { 
-            Text(
-                text = peer.displayName ?: "Unknown Peer",
-                style = MaterialTheme.typography.titleMedium
-            ) 
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = peer.displayName ?: "Unknown Peer",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                if (peer.isVerified) {
+                    Icon(
+                        Icons.Rounded.Verified,
+                        contentDescription = "Verified",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                if (isHandshaked) {
+                    val rssiIcon = when {
+                        peer.rssi > -60 -> Icons.Rounded.SignalCellularAlt
+                        peer.rssi > -80 -> Icons.Rounded.SignalCellularAlt2Bar
+                        else -> Icons.Rounded.SignalCellularAlt1Bar
+                    }
+                    Icon(
+                        rssiIcon, 
+                        contentDescription = null, 
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                    )
+                }
+            }
         },
         supportingContent = { 
             val statusText = if (isHandshaked) {

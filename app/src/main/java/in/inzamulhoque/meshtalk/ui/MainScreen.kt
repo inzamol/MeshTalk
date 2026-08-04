@@ -10,6 +10,7 @@ import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffold
 import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldRole
 import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.rememberNavBackStack
@@ -37,6 +38,14 @@ fun MainScreen(
     val navigator = rememberListDetailPaneScaffoldNavigator<NavRoute>(scaffoldDirective)
     val coroutineScope = rememberCoroutineScope()
 
+    val homeViewModel: HomeViewModel = viewModel(
+        factory = object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                return HomeViewModel(app.database.peerDao()) as T
+            }
+        }
+    )
+
     BackHandler(navigator.canNavigateBack()) {
         coroutineScope.launch {
             navigator.navigateBack()
@@ -55,13 +64,6 @@ fun MainScreen(
         value = navigator.scaffoldValue,
         listPane = {
             AnimatedPane(modifier = Modifier.fillMaxSize()) {
-                val homeViewModel: HomeViewModel = viewModel(
-                    factory = object : ViewModelProvider.Factory {
-                        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                            return HomeViewModel(app.database.peerDao()) as T
-                        }
-                    }
-                )
                 PeerListPane(
                     viewModel = homeViewModel,
                     onPeerClick = { peerId ->
@@ -73,6 +75,14 @@ fun MainScreen(
                         coroutineScope.launch {
                             navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, NavRoute.Settings)
                         }
+                    },
+                    onCreateGroupClick = {
+                        coroutineScope.launch {
+                            navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, NavRoute.CreateGroup)
+                        }
+                    },
+                    onRefresh = {
+                        app.meshNetworkManager.refreshSearch()
                     }
                 )
             }
@@ -115,13 +125,38 @@ fun MainScreen(
                                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                                     return SettingsViewModel(
                                         database = app.database,
-                                        settingsManager = app.settingsManager
+                                        settingsManager = app.settingsManager,
+                                        identityManager = app.identityManager
                                     ) as T
                                 }
                             }
                         )
                         SettingsPane(
                             viewModel = settingsViewModel,
+                            onBack = {
+                                coroutineScope.launch {
+                                    navigator.navigateBack()
+                                }
+                            }
+                        )
+                    }
+                    is NavRoute.CreateGroup -> {
+                        val peers by homeViewModel.peers.collectAsState()
+                        `in`.inzamulhoque.meshtalk.ui.chat.CreateGroupPane(
+                            peers = peers,
+                            onCreateGroup = { name, members ->
+                                coroutineScope.launch {
+                                    val groupId = java.util.UUID.randomUUID().toString()
+                                    val group = `in`.inzamulhoque.meshtalk.data.local.entity.Group(
+                                        groupId = groupId,
+                                        name = name,
+                                        memberIds = members,
+                                        adminId = myId
+                                    )
+                                    app.database.groupDao().insertGroup(group)
+                                    navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, NavRoute.Chat(groupId))
+                                }
+                            },
                             onBack = {
                                 coroutineScope.launch {
                                     navigator.navigateBack()

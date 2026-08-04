@@ -10,8 +10,11 @@ import kotlinx.coroutines.launch
 
 class SettingsViewModel(
     private val database: AppDatabase,
-    private val settingsManager: SettingsManager
+    private val settingsManager: SettingsManager,
+    private val identityManager: `in`.inzamulhoque.meshtalk.crypto.IdentityManager
 ) : ViewModel() {
+
+    val myId = identityManager.getMyId()
 
     private val _displayName = MutableStateFlow(settingsManager.displayName ?: "")
     val displayName = _displayName.asStateFlow()
@@ -24,6 +27,9 @@ class SettingsViewModel(
 
     private val _connectionToastEnabled = MutableStateFlow(settingsManager.isConnectionToastEnabled)
     val connectionToastEnabled = _connectionToastEnabled.asStateFlow()
+
+    private val _continuousSearchEnabled = MutableStateFlow(settingsManager.isContinuousSearchEnabled)
+    val continuousSearchEnabled = _continuousSearchEnabled.asStateFlow()
 
     private val _bio = MutableStateFlow(settingsManager.bio ?: "")
     val bio = _bio.asStateFlow()
@@ -61,6 +67,11 @@ class SettingsViewModel(
         _connectionToastEnabled.value = enabled
     }
 
+    fun setContinuousSearchEnabled(enabled: Boolean) {
+        settingsManager.isContinuousSearchEnabled = enabled
+        _continuousSearchEnabled.value = enabled
+    }
+
     fun deleteAllMessages() {
         viewModelScope.launch {
             database.messageDao().deleteAllMessages()
@@ -70,6 +81,15 @@ class SettingsViewModel(
     fun deleteAllPeers() {
         viewModelScope.launch {
             database.peerDao().deleteAllPeers()
+        }
+    }
+
+    fun verifyPeer(peerId: String) {
+        viewModelScope.launch {
+            val peer = database.peerDao().getPeerById(peerId)
+            if (peer != null) {
+                database.peerDao().updatePeer(peer.copy(isVerified = true))
+            }
         }
     }
 }

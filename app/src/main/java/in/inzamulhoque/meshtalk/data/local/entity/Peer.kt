@@ -13,5 +13,7 @@ data class Peer(
     val lastSeen: Long = System.currentTimeMillis(),
     val lastSyncTimestamp: Long = 0,
     val avatarUri: String? = null,
-    val bio: String? = null
+    val bio: String? = null,
+    val rssi: Int = -100,
+    val isVerified: Boolean = false
 )

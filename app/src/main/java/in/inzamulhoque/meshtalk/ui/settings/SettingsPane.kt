@@ -24,6 +24,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 
+import `in`.inzamulhoque.meshtalk.util.QRUtils
+
+@androidx.camera.core.ExperimentalGetImage
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsPane(
@@ -34,11 +37,17 @@ fun SettingsPane(
     val bio by viewModel.bio.collectAsState()
     val avatarBase64 by viewModel.avatarBase64.collectAsState()
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsState()
+    val continuousSearchEnabled by viewModel.continuousSearchEnabled.collectAsState()
     val forwardingEnabled by viewModel.forwardingEnabled.collectAsState()
     val connectionToastEnabled by viewModel.connectionToastEnabled.collectAsState()
     
     var showDeleteMessagesDialog by remember { mutableStateOf(false) }
     var showDeletePeersDialog by remember { mutableStateOf(false) }
+    var showQRCodeDialog by remember { mutableStateOf(false) }
+    var showScanner by remember { mutableStateOf(false) }
+
+    val myId = viewModel.myId
+    val myQRBitmap = remember(myId) { QRUtils.generateQRCode(myId, 400) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -138,6 +147,28 @@ fun SettingsPane(
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Trust & Identity", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                    IconButton(onClick = { showQRCodeDialog = true }) {
+                        Icon(Icons.Rounded.QrCode, contentDescription = "Show My QR")
+                    }
+                }
+
+                Button(
+                    onClick = { showScanner = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                ) {
+                    Icon(Icons.Rounded.QrCodeScanner, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Verify Peer (Scan QR)")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
                 Text("Network & Notifications", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
 
                 SettingsToggleItem(
@@ -146,6 +177,14 @@ fun SettingsPane(
                     checked = notificationsEnabled,
                     onCheckedChange = { viewModel.setNotificationsEnabled(it) },
                     icon = Icons.Rounded.Notifications
+                )
+
+                SettingsToggleItem(
+                    title = "Continuous Searching",
+                    subtitle = "Keep scanning for new peers (Battery intensive)",
+                    checked = continuousSearchEnabled,
+                    onCheckedChange = { viewModel.setContinuousSearchEnabled(it) },
+                    icon = Icons.Rounded.Search
                 )
 
                 SettingsToggleItem(
@@ -197,6 +236,43 @@ fun SettingsPane(
                 )
             }
         }
+    }
+
+    if (showQRCodeDialog) {
+        AlertDialog(
+            onDismissRequest = { showQRCodeDialog = false },
+            title = { Text("My Mesh Identity") },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Others can scan this to verify your identity.", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    if (myQRBitmap != null) {
+                        AsyncImage(
+                            model = myQRBitmap,
+                            contentDescription = "My QR Code",
+                            modifier = Modifier.size(200.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(myId.take(32) + "...", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showQRCodeDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
+    if (showScanner) {
+        QRScannerDialog(
+            onResult = { result ->
+                viewModel.verifyPeer(result)
+                showScanner = false
+            },
+            onDismiss = { showScanner = false }
+        )
     }
 
     if (showDeleteMessagesDialog) {
