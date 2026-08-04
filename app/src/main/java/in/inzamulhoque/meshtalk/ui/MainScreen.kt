@@ -69,6 +69,8 @@ fun MainScreen(
                         factory = object : ViewModelProvider.Factory {
                             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                                 return ChatViewModel(
+                                    application = app,
+                                    meshNetworkManager = app.meshNetworkManager,
                                     peerId = currentRoute.peerId,
                                     myId = myId,
                                     messageDao = app.database.messageDao(),

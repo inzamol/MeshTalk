@@ -5,10 +5,12 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.util.Log
 import `in`.inzamulhoque.meshtalk.crypto.IdentityManager
+import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import `in`.inzamulhoque.meshtalk.data.local.AppDatabase
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MeshNetworkManager(
     private val context: Context,
@@ -50,6 +52,7 @@ class MeshNetworkManager(
         }
         if (!bluetoothAdapter.isEnabled) {
             Log.w("MeshNetworkManager", "Bluetooth is disabled!")
+            ToastHelper.showToast(context, "Please enable Bluetooth to start mesh network")
             return
         }
 
@@ -67,7 +70,20 @@ class MeshNetworkManager(
         activeClients.clear()
     }
 
-    private fun connectToPeer(deviceAddress: String) {
+    fun connectToPeerById(peerId: String) {
+        scope.launch {
+            val peer = database.peerDao().getPeerById(peerId)
+            val address = peer?.deviceAddress
+            if (address != null) {
+                Log.d("MeshNetworkManager", "Proactive connection attempt to $peerId at $address")
+                connectToPeer(address)
+            } else {
+                Log.w("MeshNetworkManager", "Cannot connect to $peerId: last known address is null")
+            }
+        }
+    }
+
+    fun connectToPeer(deviceAddress: String) {
         if (activeClients.containsKey(deviceAddress)) return
 
         val device = bluetoothAdapter?.getRemoteDevice(deviceAddress) ?: return

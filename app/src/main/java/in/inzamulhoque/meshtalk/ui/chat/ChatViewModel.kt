@@ -1,23 +1,32 @@
 package `in`.inzamulhoque.meshtalk.ui.chat
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager
 import `in`.inzamulhoque.meshtalk.crypto.IdentityManager
 import `in`.inzamulhoque.meshtalk.data.local.dao.MessageDao
 import `in`.inzamulhoque.meshtalk.data.local.dao.PeerDao
 import `in`.inzamulhoque.meshtalk.data.local.entity.Message
 import `in`.inzamulhoque.meshtalk.data.local.entity.MessageStatus
 import `in`.inzamulhoque.meshtalk.data.local.entity.Peer
+import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class ChatViewModel(
+    application: Application,
+    private val meshNetworkManager: MeshNetworkManager,
     private val peerId: String,
     private val myId: String,
     private val messageDao: MessageDao,
     private val peerDao: PeerDao,
     private val identityManager: IdentityManager
-) : ViewModel() {
+) : AndroidViewModel(application) {
+
+    init {
+        meshNetworkManager.connectToPeerById(peerId)
+    }
 
     val peer: StateFlow<Peer?> = peerDao.getPeerFlowById(peerId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -32,6 +41,7 @@ class ChatViewModel(
                     try {
                         msg.copy(content = identityManager.decryptMessage(msg.content), isEncrypted = false)
                     } catch (e: Exception) {
+                        ToastHelper.showToast(getApplication(), "Failed to decrypt message from peer")
                         msg.copy(content = "[Decryption Failed]")
                     }
                 } else {
@@ -50,6 +60,7 @@ class ChatViewModel(
                 try {
                     identityManager.encryptMessage(content, encryptionKey)
                 } catch (e: Exception) {
+                    ToastHelper.showToast(getApplication(), "Encryption failed: key mismatch")
                     content
                 }
             } else {

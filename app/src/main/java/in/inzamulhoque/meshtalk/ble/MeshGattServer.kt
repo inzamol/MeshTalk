@@ -4,6 +4,7 @@ import android.bluetooth.*
 import android.content.Context
 import android.util.Log
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,12 +23,21 @@ class MeshGattServer(
     
     private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         Log.e("MeshGattServer", "Unhandled coroutine exception", throwable)
+        ToastHelper.showToast(context, "Mesh background error: ${throwable.message}")
     }
     
     private val scope = CoroutineScope(Dispatchers.IO + exceptionHandler)
-    private val writeBuffers = ConcurrentHashMap<String, ByteArray>() // Device address to data
+    private val reassemblyBuffers = ConcurrentHashMap<String, ReassemblyBuffer>()
+
+    data class ReassemblyBuffer(
+        val msgId: Byte,
+        val total: Int,
+        val chunks: MutableMap<Int, ByteArray> = mutableMapOf(),
+        var lastSeen: Long = System.currentTimeMillis()
+    )
 
     fun start() {
+        if (gattServer != null) return
         try {
             gattServer = bluetoothManager.openGattServer(context, gattServerCallback)
             val service = BluetoothGattService(
@@ -65,8 +75,8 @@ class MeshGattServer(
 
             val messageChar = BluetoothGattCharacteristic(
                 MeshConstants.MESSAGE_EXCHANGE_CHAR_UUID,
-                BluetoothGattCharacteristic.PROPERTY_WRITE,
-                BluetoothGattCharacteristic.PERMISSION_WRITE
+                BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE or BluetoothGattCharacteristic.PROPERTY_READ,
+                BluetoothGattCharacteristic.PERMISSION_WRITE or BluetoothGattCharacteristic.PERMISSION_READ
             )
             service.addCharacteristic(messageChar)
 
@@ -149,27 +159,45 @@ class MeshGattServer(
             
             try {
                 if (characteristic.uuid == MeshConstants.MESSAGE_EXCHANGE_CHAR_UUID) {
-                    if (preparedWrite) {
-                        // Buffer the data
-                        val currentBuffer = writeBuffers[device.address] ?: byteArrayOf()
-                        if (offset == 0) {
-                            writeBuffers[device.address] = data
-                        } else if (offset == currentBuffer.size) {
-                            writeBuffers[device.address] = currentBuffer + data
-                        } else {
-                            Log.w("MeshGattServer", "Invalid offset in prepared write: $offset, buffer size: ${currentBuffer.size}")
+                    if (data.size >= 4 && data[0] == 0xCC.toByte()) {
+                        // Manual chunking protocol
+                        val msgId = data[1]
+                        val index = data[2].toInt() and 0xFF
+                        val total = data[3].toInt() and 0xFF
+                        val chunkData = data.copyOfRange(4, data.size)
+                        
+                        val bufferKey = "${device.address}_$msgId"
+                        val buffer = reassemblyBuffers.getOrPut(bufferKey) {
+                            ReassemblyBuffer(msgId, total)
                         }
                         
-                        if (responseNeeded) {
-                            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, data)
+                        buffer.chunks[index] = chunkData
+                        buffer.lastSeen = System.currentTimeMillis()
+                        
+                        if (buffer.chunks.size == total) {
+                            val fullData = ByteArray(buffer.chunks.values.sumOf { it.size })
+                            var currentOffset = 0
+                            for (i in 0 until total) {
+                                val chunk = buffer.chunks[i] ?: break
+                                chunk.copyInto(fullData, currentOffset)
+                                currentOffset += chunk.size
+                            }
+                            
+                            if (currentOffset == fullData.size) {
+                                val json = String(fullData)
+                                Log.d("MeshGattServer", "Reassembled message from ${device.address} ($total chunks, ${fullData.size} bytes)")
+                                processReceivedJson(json)
+                            }
+                            reassemblyBuffers.remove(bufferKey)
                         }
                     } else {
-                        // Immediate write
+                        // Fallback to direct write if not chunked
                         val json = String(data)
                         processReceivedJson(json)
-                        if (responseNeeded) {
-                            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
-                        }
+                    }
+                    
+                    if (responseNeeded) {
+                        gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, data)
                     }
                 } else if (characteristic.uuid == MeshConstants.INVENTORY_CHAR_UUID) {
                     if (responseNeeded) {
@@ -188,15 +216,7 @@ class MeshGattServer(
         override fun onExecuteWrite(device: BluetoothDevice?, requestId: Int, execute: Boolean) {
             val device = device ?: return
             try {
-                if (execute) {
-                    val data = writeBuffers.remove(device.address)
-                    if (data != null) {
-                        val json = String(data)
-                        processReceivedJson(json)
-                    }
-                } else {
-                    writeBuffers.remove(device.address)
-                }
+                // We handle reassembly manually in onCharacteristicWriteRequest for better compatibility
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             } catch (e: SecurityException) {
                 Log.e("MeshGattServer", "Permission denied in execute write", e)
@@ -215,6 +235,7 @@ class MeshGattServer(
                     }
                 } catch (e: Exception) {
                     Log.e("MeshGattServer", "Error processing received JSON", e)
+                    ToastHelper.showToast(context, "Error reading incoming message")
                 }
             }
         }

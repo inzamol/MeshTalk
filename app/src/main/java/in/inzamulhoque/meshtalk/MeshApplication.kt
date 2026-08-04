@@ -2,6 +2,7 @@ package `in`.inzamulhoque.meshtalk
 
 import android.app.Application
 import androidx.room.Room
+import `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager
 import `in`.inzamulhoque.meshtalk.crypto.CryptoManager
 import `in`.inzamulhoque.meshtalk.crypto.IdentityManager
 import `in`.inzamulhoque.meshtalk.data.local.AppDatabase
@@ -12,6 +13,8 @@ class MeshApplication : Application() {
     lateinit var identityManager: IdentityManager
         private set
     lateinit var cryptoManager: CryptoManager
+        private set
+    lateinit var meshNetworkManager: MeshNetworkManager
         private set
 
     override fun onCreate() {
@@ -24,5 +27,6 @@ class MeshApplication : Application() {
             .build()
         cryptoManager = CryptoManager(this)
         identityManager = IdentityManager(cryptoManager)
+        meshNetworkManager = MeshNetworkManager(this, database, identityManager)
     }
 }

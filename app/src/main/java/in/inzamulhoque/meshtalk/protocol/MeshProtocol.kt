@@ -16,6 +16,30 @@ class MeshProtocol(
 ) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val messageAdapter = moshi.adapter(Message::class.java)
+    private val handshakeAdapter = moshi.adapter(Handshake::class.java)
+
+    suspend fun createHandshake(encryptionKey: String, displayName: String): Handshake {
+        return Handshake(
+            peerId = myId,
+            encryptionKey = encryptionKey,
+            displayName = displayName,
+            inventory = getInventory()
+        )
+    }
+
+    suspend fun handleHandshake(handshake: Handshake, deviceAddress: String?): List<Message> {
+        onPeerDiscovered(
+            peerId = handshake.peerId,
+            publicKey = handshake.peerId, // Initial ID is the public key
+            encryptionKey = handshake.encryptionKey,
+            displayName = handshake.displayName,
+            deviceAddress = deviceAddress
+        )
+        return getMessagesToSync(handshake.inventory)
+    }
+
+    fun serializeHandshake(handshake: Handshake): String = handshakeAdapter.toJson(handshake)
+    fun deserializeHandshake(json: String): Handshake? = try { handshakeAdapter.fromJson(json) } catch (e: Exception) { null }
 
     suspend fun onPeerDiscovered(peerId: String, publicKey: String, encryptionKey: String?, displayName: String?, deviceAddress: String?) {
         val existingPeer = peerDao.getPeerById(peerId)

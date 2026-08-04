@@ -1,12 +1,13 @@
 package `in`.inzamulhoque.meshtalk.ble
 
+import android.Manifest
 import android.bluetooth.*
 import android.content.Context
 import android.util.Log
+import androidx.annotation.RequiresPermission
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import `in`.inzamulhoque.meshtalk.util.ToastHelper
+import kotlinx.coroutines.*
 
 class MeshGattClient(
     private val context: Context,
@@ -16,99 +17,143 @@ class MeshGattClient(
 ) {
     private var gatt: BluetoothGatt? = null
     private val scope = CoroutineScope(Dispatchers.IO)
+    private var timeoutJob: Job? = null
     private val writeQueue = mutableListOf<ByteArray>()
     private var isWriting = false
     private var currentMtu = 23 // Default BLE MTU
+    private var nextMsgId = 0
+    private val pendingChunks = mutableListOf<ByteArray>()
     private var currentPeerId: String? = null
     private var currentEncryptionKey: String? = null
+    private var isHandshakeStarted = false
 
     fun connect() {
         Log.d("MeshGattClient", "Connecting to ${device.address}")
+        startTimeout()
         try {
             gatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         } catch (e: SecurityException) {
             Log.e("MeshGattClient", "Permission denied for connecting GATT", e)
+            cancelTimeout()
         }
     }
 
+    private fun startTimeout() {
+        timeoutJob?.cancel()
+        timeoutJob = scope.launch {
+            delay(15000) // 15 seconds timeout
+            Log.w("MeshGattClient", "Connection timeout reached for ${device.address}")
+            ToastHelper.showToast(context, "Connection timed out with peer")
+            withContext(Dispatchers.Main) {
+                disconnect()
+            }
+        }
+    }
+
+    private fun cancelTimeout() {
+        timeoutJob?.cancel()
+        timeoutJob = null
+    }
+
     fun disconnect() {
+        cancelTimeout()
         try {
             gatt?.disconnect()
             gatt?.close()
+            gatt = null
         } catch (e: SecurityException) {
             Log.e("MeshGattClient", "Permission denied for disconnecting GATT", e)
         }
     }
 
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     private fun processWriteQueue(gatt: BluetoothGatt) {
-        if (isWriting || writeQueue.isEmpty()) {
-            if (writeQueue.isEmpty() && !isWriting) {
-                Log.d("MeshGattClient", "Sync complete, disconnecting from ${device.address}")
+        scope.launch {
+            processWriteQueueSuspend(gatt)
+        }
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private suspend fun processWriteQueueSuspend(gatt: BluetoothGatt) {
+        if (isWriting) return
+
+        if (pendingChunks.isNotEmpty()) {
+            val chunk = pendingChunks.removeAt(0)
+            val service = gatt.getService(MeshConstants.SERVICE_UUID)
+            val char = service?.getCharacteristic(MeshConstants.MESSAGE_EXCHANGE_CHAR_UUID)
+            
+            if (char != null) {
+                char.value = chunk
+                char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                
+                var success = false
+                var attempts = 0
+                while (!success && attempts < 3) {
+                    success = try {
+                        gatt.writeCharacteristic(char)
+                    } catch (e: SecurityException) {
+                        Log.e("MeshGattClient", "SecurityException writing chunk", e)
+                        false
+                    }
+                    
+                    if (!success) {
+                        attempts++
+                        if (attempts < 3) {
+                            Log.w("MeshGattClient", "Write busy, retrying chunk in 100ms... (Attempt $attempts)")
+                            delay(100)
+                        }
+                    }
+                }
+                
+                if (success) {
+                    isWriting = true
+                } else {
+                    Log.e("MeshGattClient", "Failed to write chunk to ${device.address} after 3 attempts")
+                    ToastHelper.showToast(context, "Failed to send message chunk")
+                    withContext(Dispatchers.Main) {
+                        disconnect()
+                    }
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    disconnect()
+                }
+            }
+            return
+        }
+
+        if (writeQueue.isEmpty()) {
+            Log.d("MeshGattClient", "Sync complete, disconnecting from ${device.address}")
+            withContext(Dispatchers.Main) {
                 try { gatt.disconnect() } catch (e: SecurityException) {}
             }
             return
         }
+
+        val fullData = writeQueue.removeAt(0)
+        val msgId = (nextMsgId++ % 256).toByte()
+        val maxDataSize = currentMtu - 10 // Safety buffer (MTU - 3 overhead - 4 header - 3 safety)
+        val totalChunks = ((fullData.size + maxDataSize - 1) / maxDataSize).coerceAtMost(255)
         
-        val fullData = writeQueue[0] // Peek at the first item
-        val maxChunkSize = currentMtu - 3
+        Log.d("MeshGattClient", "Splitting message into $totalChunks chunks (Total size: ${fullData.size})")
         
-        val dataToSend: ByteArray
-        val remainingData: ByteArray?
-        
-        if (fullData.size > maxChunkSize) {
-            dataToSend = fullData.copyOfRange(0, maxChunkSize)
-            remainingData = fullData.copyOfRange(maxChunkSize, fullData.size)
-            Log.d("MeshGattClient", "Chunking data for ${device.address}: sending ${dataToSend.size}, remaining ${remainingData.size}")
-        } else {
-            dataToSend = fullData
-            remainingData = null
+        for (i in 0 until totalChunks) {
+            val start = i * maxDataSize
+            val end = ((i + 1) * maxDataSize).coerceAtMost(fullData.size)
+            val chunkData = fullData.copyOfRange(start, end)
+            
+            // Header: [0xCC (Marker), msgId, index, total]
+            val chunk = ByteArray(4 + chunkData.size)
+            chunk[0] = 0xCC.toByte()
+            chunk[1] = msgId
+            chunk[2] = i.toByte()
+            chunk[3] = totalChunks.toByte()
+            chunkData.copyInto(chunk, 4)
+            
+            pendingChunks.add(chunk)
         }
         
-        val service = gatt.getService(MeshConstants.SERVICE_UUID)
-        val char = service?.getCharacteristic(MeshConstants.MESSAGE_EXCHANGE_CHAR_UUID)
-        
-        if (char != null) {
-            char.value = dataToSend
-            // If we have remaining data, we MUST use a prepared write flow or standard chunks.
-            // But standard chunks require the server to know when to reassemble.
-            // Our server reassembles based on 'preparedWrite' (offset).
-            // Android gatt.writeCharacteristic() with offset > 0 is not directly exposed for standard writes.
-            // Reliable Write (beginReliableWrite) is the intended way for this.
-            
-            // However, to keep it simple and compatible, let's use the RELIABLE WRITE flow IF remainingData != null.
-            
-            if (remainingData != null) {
-                // For simplicity, let's just try to send the whole thing and hope Android's "Write Long" works.
-                // Most modern Android devices handle this automatically if WRITE_TYPE_DEFAULT is used.
-                char.value = fullData
-                char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                writeQueue.removeAt(0) // Remove the full data as we are sending it all (via Long Write)
-            } else {
-                char.value = dataToSend
-                char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                writeQueue.removeAt(0)
-            }
-            
-            val success = try {
-                gatt.writeCharacteristic(char)
-            } catch (e: SecurityException) {
-                Log.e("MeshGattClient", "SecurityException writing characteristic", e)
-                false
-            }
-            
-            if (success) {
-                isWriting = true
-            } else {
-                Log.e("MeshGattClient", "writeCharacteristic failed for ${device.address}")
-                // Retry next loop
-                scope.launch {
-                    processWriteQueue(gatt)
-                }
-            }
-        } else {
-            Log.e("MeshGattClient", "Message exchange characteristic not found on ${device.address}")
-            gatt.disconnect()
-        }
+        processWriteQueueSuspend(gatt)
     }
 
     private fun readInventory(gatt: BluetoothGatt) {
@@ -133,6 +178,7 @@ class MeshGattClient(
                     gatt?.requestMtu(512)
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.d("MeshGattClient", "Disconnected from ${device.address}")
+                    cancelTimeout()
                     onSyncComplete()
                 }
             } catch (e: SecurityException) {
@@ -153,13 +199,12 @@ class MeshGattClient(
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                val service = gatt?.getService(MeshConstants.SERVICE_UUID)
-                val identityChar = service?.getCharacteristic(MeshConstants.IDENTITY_CHAR_UUID)
-                try {
-                    gatt?.readCharacteristic(identityChar)
-                } catch (e: SecurityException) {
-                    Log.e("MeshGattClient", "Permission denied in services discovered", e)
+            if (status == BluetoothGatt.GATT_SUCCESS && !isHandshakeStarted) {
+                isHandshakeStarted = true
+                scope.launch {
+                    val myName = protocol.createHandshake("", "").displayName // Access via a better way later
+                    // We need my encryption key and name here. 
+                    // Let's pass them into the client or get them from a provider.
                 }
             }
         }
@@ -229,6 +274,7 @@ class MeshGattClient(
                         scope.launch {
                             protocol.onPeerDiscovered(peerId, "", encryptionKey, displayName, device.address)
                             readInventory(gatt)
+                            cancelTimeout() // Successfully synced identity
                         }
                     }
                     MeshConstants.INVENTORY_CHAR_UUID -> {
@@ -243,7 +289,8 @@ class MeshGattClient(
                             messagesToSync.forEach { msg ->
                                 writeQueue.add(protocol.serializeMessage(msg).toByteArray())
                             }
-                            processWriteQueue(gatt)
+                            delay(200) // Stack settlement delay
+                            processWriteQueueSuspend(gatt)
                         }
                     }
                 }
@@ -259,6 +306,7 @@ class MeshGattClient(
         ) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.e("MeshGattClient", "Write failed for ${device.address} with status: $status")
+                ToastHelper.showToast(context, "Sync write failed (status: $status)")
             }
             isWriting = false
             if (gatt != null) processWriteQueue(gatt)

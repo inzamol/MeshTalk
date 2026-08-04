@@ -67,15 +67,12 @@ class MeshBLEManager(
             return
         }
 
-        val filter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(MeshConstants.SERVICE_UUID))
-            .build()
+        // Relaxing filter: Some devices don't match 128-bit UUIDs in the hardware filter correctly
+        val filter = ScanFilter.Builder().build()
 
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
-            .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT)
             .build()
 
         try {
@@ -110,8 +107,13 @@ class MeshBLEManager(
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            Log.d("MeshBLEManager", "Peer discovered: ${result.device.address}")
-            onPeerDiscovered(result.device.address)
+            val scanRecord = result.scanRecord ?: return
+            val uuids = scanRecord.serviceUuids ?: return
+            
+            if (uuids.contains(ParcelUuid(MeshConstants.SERVICE_UUID))) {
+                Log.d("MeshBLEManager", "Mesh peer discovered: ${result.device.address}")
+                onPeerDiscovered(result.device.address)
+            }
         }
 
         override fun onScanFailed(errorCode: Int) {

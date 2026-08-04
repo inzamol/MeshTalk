@@ -3,6 +3,7 @@ package `in`.inzamulhoque.meshtalk.data.local.entity
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import java.util.UUID
 
@@ -12,17 +13,28 @@ import java.util.UUID
 )
 @JsonClass(generateAdapter = true)
 data class Message(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val uuid: String = UUID.randomUUID().toString(),
-    val senderId: String,
-    val receiverId: String,
-    val content: String,
+    @PrimaryKey(autoGenerate = true) 
+    @Json(name = "i") val id: Long = 0,
+    
+    @Json(name = "u") val uuid: String = UUID.randomUUID().toString(),
+    
+    @Json(name = "s") val senderId: String,
+    
+    @Json(name = "r") val receiverId: String,
+    
+    @Json(name = "c") val content: String,
+    
     val localPlaintext: String? = null,
-    val timestamp: Long = System.currentTimeMillis(),
-    val isEncrypted: Boolean = true,
-    val status: MessageStatus = MessageStatus.SENT,
-    val hopCount: Int = 0,
-    val expiryTimestamp: Long = System.currentTimeMillis() + 7 * 24 * 60 * 60 * 1000 // 7 days default
+    
+    @Json(name = "t") val timestamp: Long = System.currentTimeMillis(),
+    
+    @Json(name = "e") val isEncrypted: Boolean = true,
+    
+    @Json(name = "st") val status: MessageStatus = MessageStatus.SENT,
+    
+    @Json(name = "h") val hopCount: Int = 0,
+    
+    @Json(name = "x") val expiryTimestamp: Long = System.currentTimeMillis() + 7 * 24 * 60 * 60 * 1000 // 7 days default
 )
 
 enum class MessageStatus {
