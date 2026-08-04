@@ -228,7 +228,7 @@ fun SettingsPane(
 
                 Spacer(modifier = Modifier.height(24.dp))
                 Text(
-                    "Mesh Talk v1.0.0",
+                    "Mesh Talk v1.1.0",
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     style = MaterialTheme.typography.labelSmall,
