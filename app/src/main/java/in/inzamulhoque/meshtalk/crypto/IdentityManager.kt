@@ -48,4 +48,15 @@ class IdentityManager(
         val decrypted = cryptoManager.decrypt(encrypted)
         return String(decrypted)
     }
+
+    /**
+     * Generates a rotating 4-byte Stealth ID for BLE advertising.
+     * Prevents physical tracking by changing every 15 minutes.
+     */
+    fun getStealthId(): ByteArray {
+        val window = System.currentTimeMillis() / (15 * 60 * 1000)
+        val input = getMyId() + window.toString()
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
+        return digest.copyOfRange(0, 4)
+    }
 }

@@ -22,6 +22,8 @@ import `in`.inzamulhoque.meshtalk.ui.home.PeerListPane
 import `in`.inzamulhoque.meshtalk.ui.navigation.NavRoute
 import `in`.inzamulhoque.meshtalk.ui.settings.SettingsPane
 import `in`.inzamulhoque.meshtalk.ui.settings.SettingsViewModel
+import `in`.inzamulhoque.meshtalk.ui.onboarding.WelcomePane
+import `in`.inzamulhoque.meshtalk.ui.settings.QRScannerScreen
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -37,11 +39,32 @@ fun MainScreen(
     val scaffoldDirective = calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
     val navigator = rememberListDetailPaneScaffoldNavigator<NavRoute>(scaffoldDirective)
     val coroutineScope = rememberCoroutineScope()
+    
+    var onboardingRequired by remember { mutableStateOf(app.settingsManager.displayName == null || app.settingsManager.displayName!!.isBlank()) }
+    var showGlobalScanner by remember { mutableStateOf(false) }
+
+    if (onboardingRequired) {
+        WelcomePane(
+            onNameSet = { name ->
+                app.settingsManager.displayName = name
+                onboardingRequired = false
+                app.meshNetworkManager.start() // Restart to update display name in BLE
+            }
+        )
+        return
+    }
 
     val homeViewModel: HomeViewModel = viewModel(
         factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return HomeViewModel(app.database.peerDao()) as T
+                return HomeViewModel(
+                    app.database.peerDao(), 
+                    app.database.messageDao(),
+                    app.settingsManager,
+                    app.identityManager,
+                    app.meshNetworkManager.connectedPeerAddresses,
+                    myId
+                ) as T
             }
         }
     )
@@ -50,6 +73,10 @@ fun MainScreen(
         coroutineScope.launch {
             navigator.navigateBack()
         }
+    }
+
+    LaunchedEffect(navigator.currentDestination) {
+        homeViewModel.refreshSettings()
     }
 
     LaunchedEffect(initialPeerId) {
@@ -83,6 +110,9 @@ fun MainScreen(
                     },
                     onRefresh = {
                         app.meshNetworkManager.refreshSearch()
+                    },
+                    onAddPeerClick = {
+                        showGlobalScanner = true
                     }
                 )
             }
@@ -126,7 +156,8 @@ fun MainScreen(
                                     return SettingsViewModel(
                                         database = app.database,
                                         settingsManager = app.settingsManager,
-                                        identityManager = app.identityManager
+                                        identityManager = app.identityManager,
+                                        meshNetworkManager = app.meshNetworkManager
                                     ) as T
                                 }
                             }
@@ -137,13 +168,18 @@ fun MainScreen(
                                 coroutineScope.launch {
                                     navigator.navigateBack()
                                 }
+                            },
+                            onNavigateToChat = { peerId ->
+                                coroutineScope.launch {
+                                    navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, NavRoute.Chat(peerId))
+                                }
                             }
                         )
                     }
                     is NavRoute.CreateGroup -> {
-                        val peers by homeViewModel.peers.collectAsState()
+                        val peerModels by homeViewModel.peers.collectAsState()
                         `in`.inzamulhoque.meshtalk.ui.chat.CreateGroupPane(
-                            peers = peers,
+                            peers = peerModels.map { it.peer },
                             onCreateGroup = { name, members ->
                                 coroutineScope.launch {
                                     val groupId = java.util.UUID.randomUUID().toString()
@@ -171,4 +207,18 @@ fun MainScreen(
             }
         }
     )
+
+    if (showGlobalScanner) {
+        @androidx.camera.core.ExperimentalGetImage
+        QRScannerScreen(
+            onResult = { result ->
+                val peerId = homeViewModel.verifyPeer(result)
+                showGlobalScanner = false
+                coroutineScope.launch {
+                    navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, NavRoute.Chat(peerId))
+                }
+            },
+            onDismiss = { showGlobalScanner = false }
+        )
+    }
 }

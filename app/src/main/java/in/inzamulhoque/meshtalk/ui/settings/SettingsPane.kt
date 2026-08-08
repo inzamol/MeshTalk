@@ -26,12 +26,17 @@ import androidx.compose.ui.draw.clip
 
 import `in`.inzamulhoque.meshtalk.util.QRUtils
 
+import androidx.camera.core.ExperimentalGetImage
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+
 @androidx.camera.core.ExperimentalGetImage
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsPane(
     viewModel: SettingsViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToChat: (String) -> Unit = {}
 ) {
     val displayName by viewModel.displayName.collectAsState()
     val bio by viewModel.bio.collectAsState()
@@ -40,14 +45,31 @@ fun SettingsPane(
     val continuousSearchEnabled by viewModel.continuousSearchEnabled.collectAsState()
     val forwardingEnabled by viewModel.forwardingEnabled.collectAsState()
     val connectionToastEnabled by viewModel.connectionToastEnabled.collectAsState()
+    val showConnectingDevicesEnabled by viewModel.showConnectingDevicesEnabled.collectAsState()
+    val movementSensingEnabled by viewModel.movementSensingEnabled.collectAsState()
+    val pruneOthersDays by viewModel.pruneOthersDays.collectAsState()
+    val pruneOwnEnabled by viewModel.pruneOwnEnabled.collectAsState()
+    val pruneOwnDays by viewModel.pruneOwnDays.collectAsState()
+    val isEditMode by viewModel.isEditMode.collectAsState()
+    val publicShoutEnabled by viewModel.publicShoutEnabled.collectAsState()
     
     var showDeleteMessagesDialog by remember { mutableStateOf(false) }
     var showDeletePeersDialog by remember { mutableStateOf(false) }
-    var showQRCodeDialog by remember { mutableStateOf(false) }
     var showScanner by remember { mutableStateOf(false) }
 
     val myId = viewModel.myId
-    val myQRBitmap = remember(myId) { QRUtils.generateQRCode(myId, 400) }
+    val displayNameState by viewModel.displayName.collectAsState()
+    val myQRBitmap = remember(myId, displayNameState) { 
+        QRUtils.generateQRCode("mt:$myId:$displayNameState", 600) 
+    }
+
+    var tempName by remember { mutableStateOf(displayName) }
+    var tempBio by remember { mutableStateOf(bio) }
+
+    LaunchedEffect(displayName, bio) {
+        tempName = displayName
+        tempBio = bio
+    }
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -65,10 +87,21 @@ fun SettingsPane(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text("Profile & Settings") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (!isEditMode) {
+                        IconButton(onClick = { viewModel.setEditMode(true) }) {
+                            Icon(Icons.Rounded.Edit, contentDescription = "Edit Profile")
+                        }
+                    } else {
+                        IconButton(onClick = { viewModel.saveProfile(tempName, tempBio) }) {
+                            Icon(Icons.Rounded.Check, contentDescription = "Save")
+                        }
                     }
                 }
             )
@@ -83,81 +116,138 @@ fun SettingsPane(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(CircleShape)
-                    .clickable { avatarPicker.launch("image/*") }
+            // QR Identity Card (1st Card)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             ) {
-                if (avatarBase64 != null) {
-                    val bytes = Base64.decode(avatarBase64, Base64.DEFAULT)
-                    AsyncImage(
-                        model = bytes,
-                        contentDescription = "Avatar",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "Your Mesh Identity",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
                     )
-                } else {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.primaryContainer
-                    ) {
-                        Icon(
-                            Icons.Rounded.AddAPhoto,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .padding(24.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    Spacer(modifier = Modifier.height(16.dp))
+                    if (myQRBitmap != null) {
+                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            AsyncImage(
+                                model = myQRBitmap,
+                                contentDescription = "My QR Code",
+                                modifier = Modifier.size(240.dp).clip(MaterialTheme.shapes.medium)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        myId.take(32) + "...",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Others can scan this to add you as a verified peer.",
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Profile Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(CircleShape)
+                        .clickable(enabled = isEditMode) { avatarPicker.launch("image/*") }
+                ) {
+                    if (avatarBase64 != null) {
+                        val bytes = Base64.decode(avatarBase64, Base64.DEFAULT)
+                        AsyncImage(
+                            model = bytes,
+                            contentDescription = "Avatar",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                    } else {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Icon(
+                                if (isEditMode) Icons.Rounded.AddAPhoto else Icons.Rounded.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp).padding(24.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.width(16.dp))
+                
+                Column {
+                    if (isEditMode) {
+                        OutlinedTextField(
+                            value = tempName,
+                            onValueChange = { tempName = it },
+                            label = { Text("Display Name") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                    } else {
+                        Text(
+                            displayName.ifBlank { "New User" },
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            bio.ifBlank { "No bio yet" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.outline
                         )
                     }
                 }
             }
-            
-            Text(
-                displayName.ifBlank { "New User" },
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.primary
-            )
+
+            if (isEditMode) {
+                OutlinedTextField(
+                    value = tempBio,
+                    onValueChange = { tempBio = it },
+                    label = { Text("Bio") },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Tell us about yourself...") }
+                )
+                
+                Button(
+                    onClick = { viewModel.saveProfile(tempName, tempBio) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = tempName.isNotBlank()
+                ) {
+                    Text("Save Changes")
+                }
+                
+                TextButton(onClick = { viewModel.setEditMode(false) }) {
+                    Text("Cancel")
+                }
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.Start
             ) {
-                Text("Profile", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                Text("Verification", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 
-                OutlinedTextField(
-                    value = displayName,
-                    onValueChange = { viewModel.updateDisplayName(it) },
-                    label = { Text("Display Name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null) }
-                )
-
-                OutlinedTextField(
-                    value = bio,
-                    onValueChange = { viewModel.updateBio(it) },
-                    label = { Text("Bio") },
-                    modifier = Modifier.fillMaxWidth(),
-                    leadingIcon = { Icon(Icons.Rounded.Info, contentDescription = null) },
-                    placeholder = { Text("Tell us about yourself...") }
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Trust & Identity", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                    IconButton(onClick = { showQRCodeDialog = true }) {
-                        Icon(Icons.Rounded.QrCode, contentDescription = "Show My QR")
-                    }
-                }
-
                 Button(
                     onClick = { showScanner = true },
                     modifier = Modifier.fillMaxWidth(),
@@ -165,7 +255,7 @@ fun SettingsPane(
                 ) {
                     Icon(Icons.Rounded.QrCodeScanner, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Verify Peer (Scan QR)")
+                    Text("Add Peer (Scan QR)")
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -188,6 +278,14 @@ fun SettingsPane(
                 )
 
                 SettingsToggleItem(
+                    title = "Adaptive Scanning",
+                    subtitle = "Search more frequently when moving, less when stationary",
+                    checked = movementSensingEnabled,
+                    onCheckedChange = { viewModel.setMovementSensingEnabled(it) },
+                    icon = Icons.Rounded.Search
+                )
+
+                SettingsToggleItem(
                     title = "Message Forwarding",
                     subtitle = "Help the mesh by forwarding encrypted messages for others",
                     checked = forwardingEnabled,
@@ -202,6 +300,56 @@ fun SettingsPane(
                     onCheckedChange = { viewModel.setConnectionToastEnabled(it) },
                     icon = Icons.Rounded.Info
                 )
+
+                SettingsToggleItem(
+                    title = "Show connecting devices",
+                    subtitle = "Show peers that are currently connecting in the list",
+                    checked = showConnectingDevicesEnabled,
+                    onCheckedChange = { viewModel.setShowConnectingDevicesEnabled(it) },
+                    icon = Icons.Rounded.SwapHoriz
+                )
+
+                SettingsToggleItem(
+                    title = "Public Shout",
+                    subtitle = "Enable to send and receive broadcast messages nearby",
+                    checked = publicShoutEnabled,
+                    onCheckedChange = { viewModel.setPublicShoutEnabled(it) },
+                    icon = Icons.Rounded.Campaign
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Message Pruning", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                
+                Column(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    Text("Auto-delete others' messages after $pruneOthersDays days", style = MaterialTheme.typography.bodyLarge)
+                    Text("Received messages will be deleted. Your own messages are kept unless specified below.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Slider(
+                        value = pruneOthersDays.toFloat(),
+                        onValueChange = { viewModel.setPruneOthersDays(it.toInt()) },
+                        valueRange = 7f..365f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                SettingsToggleItem(
+                    title = "Auto-delete my own messages",
+                    subtitle = "Enable to prune your own old sent history",
+                    checked = pruneOwnEnabled,
+                    onCheckedChange = { viewModel.setPruneOwnEnabled(it) },
+                    icon = Icons.Rounded.History
+                )
+                
+                if (pruneOwnEnabled) {
+                    Column(modifier = Modifier.padding(horizontal = 8.dp)) {
+                        Text("Delete my messages after $pruneOwnDays days", style = MaterialTheme.typography.bodyLarge)
+                        Slider(
+                            value = pruneOwnDays.toFloat(),
+                            onValueChange = { viewModel.setPruneOwnDays(it.toInt()) },
+                            valueRange = 30f..730f,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Data Management", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
@@ -228,9 +376,9 @@ fun SettingsPane(
 
                 Spacer(modifier = Modifier.height(24.dp))
                 Text(
-                    "Mesh Talk v1.1.0",
+                    "Mesh Talk v1.2.0",
                     modifier = Modifier.fillMaxWidth(),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline
                 )
@@ -238,38 +386,13 @@ fun SettingsPane(
         }
     }
 
-    if (showQRCodeDialog) {
-        AlertDialog(
-            onDismissRequest = { showQRCodeDialog = false },
-            title = { Text("My Mesh Identity") },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Others can scan this to verify your identity.", style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    if (myQRBitmap != null) {
-                        AsyncImage(
-                            model = myQRBitmap,
-                            contentDescription = "My QR Code",
-                            modifier = Modifier.size(200.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(myId.take(32) + "...", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showQRCodeDialog = false }) {
-                    Text("Close")
-                }
-            }
-        )
-    }
-
     if (showScanner) {
-        QRScannerDialog(
+        @androidx.camera.core.ExperimentalGetImage
+        QRScannerScreen(
             onResult = { result ->
-                viewModel.verifyPeer(result)
+                val peerId = viewModel.verifyPeer(result)
                 showScanner = false
+                onNavigateToChat(peerId)
             },
             onDismiss = { showScanner = false }
         )

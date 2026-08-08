@@ -26,6 +26,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
 import android.util.Base64
 import `in`.inzamulhoque.meshtalk.data.local.entity.MessageType
+import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,6 +41,7 @@ fun ChatPane(
     val messages by viewModel.messages.collectAsState()
     var text by remember { mutableStateOf("") }
     var showMenu by remember { mutableStateOf(false) }
+    var showVerifyDialog by remember { mutableStateOf(false) }
     var messageToDelete by remember { mutableStateOf<Message?>(null) }
 
     val imagePicker = rememberLauncherForActivityResult(
@@ -54,8 +56,21 @@ fun ChatPane(
             TopAppBar(
                 title = { 
                     Column {
-                        Text(peer?.displayName ?: "Chat")
-                        if (peer?.id?.contains("-") == true) { // Basic heuristic for group ID
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(peer?.displayName ?: "Chat")
+                            if (peer?.isVerified == true) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    Icons.Rounded.Verified,
+                                    contentDescription = "Verified",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        if (peer?.id == MeshProtocol.PUBLIC_GROUP_ID) {
+                            Text("Public Shout", style = MaterialTheme.typography.labelSmall)
+                        } else if (peer?.id?.contains("-") == true) { 
                              Text("Group Chat", style = MaterialTheme.typography.labelSmall)
                         }
                     }
@@ -68,6 +83,11 @@ fun ChatPane(
                     }
                 },
                 actions = {
+                    if (peer?.isVerified == false) {
+                        IconButton(onClick = { showVerifyDialog = true }) {
+                            Icon(Icons.Rounded.VerifiedUser, contentDescription = "Verify Contact", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                     IconButton(onClick = { showMenu = true }) {
                         Icon(Icons.Rounded.MoreVert, contentDescription = "Menu")
                     }
@@ -151,6 +171,34 @@ fun ChatPane(
             },
             dismissButton = {
                 TextButton(onClick = { messageToDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showVerifyDialog) {
+        AlertDialog(
+            onDismissRequest = { showVerifyDialog = false },
+            title = { Text("Verify Contact") },
+            text = {
+                Column {
+                    Text("Trust this user and pin their identity?")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("ID Fingerprint:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    Text(peer?.id ?: "", style = MaterialTheme.typography.bodySmall, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.verifyCurrentPeer()
+                    showVerifyDialog = false
+                }) {
+                    Text("Verify & Pin")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showVerifyDialog = false }) {
                     Text("Cancel")
                 }
             }

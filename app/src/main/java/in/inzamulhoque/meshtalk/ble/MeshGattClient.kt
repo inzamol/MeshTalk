@@ -6,7 +6,9 @@ import android.bluetooth.*
 import android.content.Context
 import android.util.Log
 import androidx.annotation.RequiresPermission
+import `in`.inzamulhoque.meshtalk.data.local.entity.Message
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+import `in`.inzamulhoque.meshtalk.protocol.proto.*
 import `in`.inzamulhoque.meshtalk.util.PermissionUtils
 import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import kotlinx.coroutines.*
@@ -76,7 +78,7 @@ class MeshGattClient(
     private fun resetIdleTimeout() {
         idleDisconnectJob?.cancel()
         idleDisconnectJob = scope.launch {
-            delay(15000) // Disconnect after 15s of inactivity
+            delay(120000) // Disconnect after 2 minutes of inactivity
             Log.d("MeshGattClient", "Idle timeout reached for ${device.address}")
             withContext(Dispatchers.Main) {
                 disconnect()
@@ -94,9 +96,9 @@ class MeshGattClient(
         } catch (_: SecurityException) {}
     }
 
-    fun sendData(json: String) {
+    fun sendData(data: ByteArray) {
         scope.launch {
-            writeQueue.add(json.toByteArray())
+            writeQueue.add(data)
             val g = gatt ?: return@launch
             processWriteQueueSuspend(g)
         }
@@ -185,7 +187,8 @@ class MeshGattClient(
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             try {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    Log.d("MeshGattClient", "Connected to ${device.address}. Requesting MTU 512...")
+                    Log.d("MeshGattClient", "Connected to ${device.address}. Requesting MTU 512 and High Priority...")
+                    gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
                     gatt?.requestMtu(512)
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.d("MeshGattClient", "Disconnected from ${device.address}")
@@ -243,10 +246,9 @@ class MeshGattClient(
             
             scope.launch {
                 val handshake = protocol.createHandshake(myEncryptionKey, myDisplayName)
-                val json = protocol.serializeHandshake(handshake)
+                val data = protocol.serializeHandshake(handshake)
                 Log.d("MeshGattClient", "Sending handshake to ${device.address}")
-                writeQueue.add(json.toByteArray())
-                processWriteQueueSuspend(gatt)
+                sendData(data)
             }
         }
 
@@ -275,34 +277,33 @@ class MeshGattClient(
                         }
                         
                         if (currentOffset == fullData.size) {
-                            val json = String(fullData)
                             Log.d("MeshGattClient", "Reassembled incoming data from ${device.address}")
                             
-                            val handshake = protocol.deserializeHandshake(json)
-                            if (handshake != null) {
-                                scope.launch {
-                                    val messagesToSync = protocol.handleHandshake(handshake, device.address)
-                                    messagesToSync.forEach { msg ->
-                                        sendData(protocol.serializeMessage(msg))
+                            val packet = protocol.parsePacket(fullData)
+                            when (packet) {
+                                is ProtoHandshake -> {
+                                    scope.launch {
+                                        val messagesToSync = protocol.handleHandshake(packet, device.address)
+                                        messagesToSync.forEach { msg ->
+                                            sendData(protocol.serializeMessage(msg))
+                                        }
+                                        cancelConnectionTimeout()
                                     }
-                                    cancelConnectionTimeout() // Handshake complete, stop connection timer
                                 }
-                            } else {
-                                scope.launch {
-                                    val message = protocol.deserializeMessage(json)
-                                    if (message != null) {
-                                        val (reply, forward) = protocol.processReceivedMessage(message)
+                                is Message -> {
+                                    scope.launch {
+                                        val (reply, forward) = protocol.processReceivedMessage(packet)
                                         if (reply != null) {
                                             sendData(protocol.serializeSyncUpdate(reply))
                                         }
                                         if (forward != null) {
                                             networkManagerProvider()?.forwardToOthers(forward, device.address)
                                         }
-                                        return@launch
                                     }
-                                    val syncUpdate = protocol.deserializeSyncUpdate(json)
-                                    if (syncUpdate != null) {
-                                        protocol.processSyncUpdate(syncUpdate)
+                                }
+                                is ProtoSyncUpdate -> {
+                                    scope.launch {
+                                        protocol.processSyncUpdate(packet)
                                     }
                                 }
                             }

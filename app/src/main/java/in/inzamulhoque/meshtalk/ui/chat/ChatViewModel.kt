@@ -23,6 +23,8 @@ import android.graphics.BitmapFactory
 import java.io.ByteArrayOutputStream
 
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+import `in`.inzamulhoque.meshtalk.protocol.proto.ProtoSyncUpdate
+import `in`.inzamulhoque.meshtalk.protocol.proto.SyncUpdateType
 
 class ChatViewModel(
     application: Application,
@@ -47,17 +49,27 @@ class ChatViewModel(
         messageDao.getMessagesForPeer(peerId)
     }).onEach { list ->
             // Mark unread incoming messages as READ
-            val unread = list.filter { it.receiverId == myId && it.status != MessageStatus.READ }
+            val isPublic = peerId == MeshProtocol.PUBLIC_GROUP_ID
+            val unread = list.filter { 
+                val isIncoming = if (isPublic) it.senderId != myId else it.receiverId == myId
+                isIncoming && it.status != MessageStatus.READ 
+            }
+            
             if (unread.isNotEmpty()) {
                 unread.forEach { msg ->
                     messageDao.updateMessageStatus(msg.id, MessageStatus.READ.name)
-                    meshNetworkManager.broadcastSyncUpdate(
-                        `in`.inzamulhoque.meshtalk.protocol.SyncUpdate(
-                            type = `in`.inzamulhoque.meshtalk.protocol.SyncUpdateType.READ,
-                            targetUuid = msg.uuid,
-                            senderId = myId
+                    
+                    // Only broadcast READ receipts for private chats
+                    if (!isPublic) {
+                        meshNetworkManager.broadcastSyncUpdate(
+                            ProtoSyncUpdate.newBuilder()
+                                .setType(SyncUpdateType.READ)
+                                .setTargetUuid(msg.uuid)
+                                .setSenderId(myId)
+                                .setTimestamp(System.currentTimeMillis())
+                                .build()
                         )
-                    )
+                    }
                 }
             }
         }
@@ -185,11 +197,12 @@ class ChatViewModel(
             messageDao.deleteMessage(message)
             if (message.senderId == myId) {
                 meshNetworkManager.broadcastSyncUpdate(
-                    `in`.inzamulhoque.meshtalk.protocol.SyncUpdate(
-                        type = `in`.inzamulhoque.meshtalk.protocol.SyncUpdateType.DELETE_MESSAGE,
-                        targetUuid = message.uuid,
-                        senderId = myId
-                    )
+                    ProtoSyncUpdate.newBuilder()
+                        .setType(SyncUpdateType.DELETE_MESSAGE)
+                        .setTargetUuid(message.uuid)
+                        .setSenderId(myId)
+                        .setTimestamp(System.currentTimeMillis())
+                        .build()
                 )
             }
         }
@@ -201,6 +214,15 @@ class ChatViewModel(
             val p = peerDao.getPeerById(peerId)
             if (p != null) {
                 peerDao.deletePeer(p)
+            }
+        }
+    }
+
+    fun verifyCurrentPeer() {
+        viewModelScope.launch {
+            val p = peerDao.getPeerById(peerId)
+            if (p != null) {
+                peerDao.updatePeer(p.copy(isVerified = true))
             }
         }
     }

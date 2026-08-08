@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+.artifacts
+.agent
+.idea
+*.jks

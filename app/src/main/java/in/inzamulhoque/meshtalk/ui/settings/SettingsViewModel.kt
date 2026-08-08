@@ -11,7 +11,8 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(
     private val database: AppDatabase,
     private val settingsManager: SettingsManager,
-    private val identityManager: `in`.inzamulhoque.meshtalk.crypto.IdentityManager
+    private val identityManager: `in`.inzamulhoque.meshtalk.crypto.IdentityManager,
+    private val meshNetworkManager: `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager
 ) : ViewModel() {
 
     val myId = identityManager.getMyId()
@@ -30,6 +31,27 @@ class SettingsViewModel(
 
     private val _continuousSearchEnabled = MutableStateFlow(settingsManager.isContinuousSearchEnabled)
     val continuousSearchEnabled = _continuousSearchEnabled.asStateFlow()
+
+    private val _showConnectingDevicesEnabled = MutableStateFlow(settingsManager.isShowConnectingDevicesEnabled)
+    val showConnectingDevicesEnabled = _showConnectingDevicesEnabled.asStateFlow()
+
+    private val _pruneOthersDays = MutableStateFlow(settingsManager.pruneOthersMessagesDays)
+    val pruneOthersDays = _pruneOthersDays.asStateFlow()
+
+    private val _pruneOwnEnabled = MutableStateFlow(settingsManager.isPruningOwnMessagesEnabled)
+    val pruneOwnEnabled = _pruneOwnEnabled.asStateFlow()
+
+    private val _pruneOwnDays = MutableStateFlow(settingsManager.pruneOwnMessagesDays)
+    val pruneOwnDays = _pruneOwnDays.asStateFlow()
+
+    private val _movementSensingEnabled = MutableStateFlow(settingsManager.isMovementSensingEnabled)
+    val movementSensingEnabled = _movementSensingEnabled.asStateFlow()
+
+    private val _isEditMode = MutableStateFlow(false)
+    val isEditMode = _isEditMode.asStateFlow()
+
+    private val _publicShoutEnabled = MutableStateFlow(settingsManager.isPublicShoutEnabled)
+    val publicShoutEnabled = _publicShoutEnabled.asStateFlow()
 
     private val _bio = MutableStateFlow(settingsManager.bio ?: "")
     val bio = _bio.asStateFlow()
@@ -70,6 +92,48 @@ class SettingsViewModel(
     fun setContinuousSearchEnabled(enabled: Boolean) {
         settingsManager.isContinuousSearchEnabled = enabled
         _continuousSearchEnabled.value = enabled
+        meshNetworkManager.updateScanningState()
+    }
+
+    fun setShowConnectingDevicesEnabled(enabled: Boolean) {
+        settingsManager.isShowConnectingDevicesEnabled = enabled
+        _showConnectingDevicesEnabled.value = enabled
+    }
+
+    fun setPruneOthersDays(days: Int) {
+        settingsManager.pruneOthersMessagesDays = days
+        _pruneOthersDays.value = days
+    }
+
+    fun setPruneOwnEnabled(enabled: Boolean) {
+        settingsManager.isPruningOwnMessagesEnabled = enabled
+        _pruneOwnEnabled.value = enabled
+    }
+
+    fun setPruneOwnDays(days: Int) {
+        settingsManager.pruneOwnMessagesDays = days
+        _pruneOwnDays.value = days
+    }
+
+    fun setMovementSensingEnabled(enabled: Boolean) {
+        settingsManager.isMovementSensingEnabled = enabled
+        _movementSensingEnabled.value = enabled
+        meshNetworkManager.updateScanningState() // Scanning logic will now check movement
+    }
+
+    fun setEditMode(enabled: Boolean) {
+        _isEditMode.value = enabled
+    }
+
+    fun saveProfile(name: String, bio: String) {
+        updateDisplayName(name)
+        updateBio(bio)
+        setEditMode(false)
+    }
+
+    fun setPublicShoutEnabled(enabled: Boolean) {
+        settingsManager.isPublicShoutEnabled = enabled
+        _publicShoutEnabled.value = enabled
     }
 
     fun deleteAllMessages() {
@@ -84,12 +148,29 @@ class SettingsViewModel(
         }
     }
 
-    fun verifyPeer(peerId: String) {
+    fun verifyPeer(qrResult: String): String {
+        val parts = qrResult.split(":")
+        val (peerId, name) = if (parts.size >= 3 && parts[0] == "mt") {
+            parts[1] to parts[2]
+        } else {
+            qrResult to "Verified Peer"
+        }
+
         viewModelScope.launch {
-            val peer = database.peerDao().getPeerById(peerId)
-            if (peer != null) {
-                database.peerDao().updatePeer(peer.copy(isVerified = true))
+            val existing = database.peerDao().getPeerById(peerId)
+            if (existing != null) {
+                database.peerDao().updatePeer(existing.copy(isVerified = true, displayName = if (existing.displayName == "Mesh Peer" || existing.displayName == "Connecting...") name else existing.displayName))
+            } else {
+                database.peerDao().insertPeer(`in`.inzamulhoque.meshtalk.data.local.entity.Peer(
+                    id = peerId,
+                    publicKey = peerId,
+                    displayName = name,
+                    deviceAddress = null,
+                    isVerified = true,
+                    bio = "Added via QR"
+                ))
             }
         }
+        return peerId
     }
 }
