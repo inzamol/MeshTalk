@@ -5,7 +5,9 @@ import android.Manifest
 import android.bluetooth.*
 import android.content.Context
 import android.util.Log
+import `in`.inzamulhoque.meshtalk.data.local.entity.Message
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+import `in`.inzamulhoque.meshtalk.protocol.proto.*
 import `in`.inzamulhoque.meshtalk.util.PermissionUtils
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -164,17 +166,27 @@ class MeshGattServer(
                         var curr = 0
                         for (i in 0 until total) { buffer.chunks[i]?.let { it.copyInto(fullData, curr); curr += it.size } }
                         
-                        val handshake = protocol.deserializeHandshake(fullData)
-                        if (handshake != null) {
-                            scope.launch {
-                                protocol.handleHandshake(handshake, dev.address)
-                                sendDataViaNotification(dev, protocol.serializeHandshake(protocol.createHandshake(myEncryptionKey, displayNameProvider())))
-                                protocol.getMessagesToSync(handshake.bloomFilter).forEach { sendDataViaNotification(dev, protocol.serializeMessage(it)) }
+                        val packet = protocol.parsePacket(fullData)
+                        when (packet) {
+                            is ProtoHandshake -> {
+                                scope.launch {
+                                    protocol.handleHandshake(packet, dev.address)
+                                    sendDataViaNotification(dev, protocol.serializeHandshake(protocol.createHandshake(myEncryptionKey, displayNameProvider())))
+                                    protocol.getMessagesToSync(packet.bloomFilter).forEach { sendDataViaNotification(dev, protocol.serializeMessage(it)) }
+                                }
                             }
-                        } else processReceivedData(fullData, dev)
+                            is Message -> processReceivedMessage(packet, dev)
+                            is ProtoSyncUpdate -> scope.launch { protocol.processSyncUpdate(packet) }
+                        }
                         reassemblyBuffers.remove(bufferKey)
                     }
-                } else processReceivedData(data, dev)
+                } else {
+                    val packet = protocol.parsePacket(data)
+                    when (packet) {
+                        is Message -> processReceivedMessage(packet, dev)
+                        is ProtoSyncUpdate -> scope.launch { protocol.processSyncUpdate(packet) }
+                    }
+                }
                 if (responseNeeded) gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, data)
             } else if (responseNeeded) gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
         }
@@ -187,19 +199,15 @@ class MeshGattServer(
 
         private fun totalChunksFromData(data: ByteArray): Int = data[3].toInt() and 0xFF
 
-        private fun processReceivedData(data: ByteArray, fromDevice: BluetoothDevice) {
+        private fun processReceivedMessage(message: Message, fromDevice: BluetoothDevice) {
             scope.launch {
-                protocol.deserializeMessage(data)?.let { 
-                    val (reply, forward) = protocol.processReceivedMessage(it)
-                    if (reply != null) {
-                        sendDataViaNotification(fromDevice, protocol.serializeSyncUpdate(reply))
-                    }
-                    if (forward != null) {
-                        networkManagerProvider()?.forwardToOthers(forward, fromDevice.address)
-                    }
-                    return@launch 
+                val (reply, forward) = protocol.processReceivedMessage(message)
+                if (reply != null) {
+                    sendDataViaNotification(fromDevice, protocol.serializeSyncUpdate(reply))
                 }
-                protocol.deserializeSyncUpdate(data)?.let { protocol.processSyncUpdate(it); return@launch }
+                if (forward != null) {
+                    networkManagerProvider()?.forwardToOthers(forward, fromDevice.address)
+                }
             }
         }
     }

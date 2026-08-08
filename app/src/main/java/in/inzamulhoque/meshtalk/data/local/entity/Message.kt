@@ -11,7 +11,13 @@ import java.util.UUID
 @Keep
 @Entity(
     tableName = "messages",
-    indices = [Index(value = ["uuid"], unique = true)]
+    indices = [
+        Index(value = ["uuid"], unique = true),
+        Index(value = ["senderId"]),
+        Index(value = ["receiverId"]),
+        Index(value = ["groupId"]),
+        Index(value = ["timestamp"])
+    ]
 )
 @JsonClass(generateAdapter = true)
 data class Message(

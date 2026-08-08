@@ -38,3 +38,11 @@ message ProtoSyncUpdate {
   string sender_id = 3;
   int64 timestamp = 4;
 }
+
+message MeshPacket {
+  oneof payload {
+    ProtoHandshake handshake = 1;
+    ProtoMessage message = 2;
+    ProtoSyncUpdate sync_update = 3;
+  }
+}

@@ -50,6 +50,9 @@ class SettingsViewModel(
     private val _isEditMode = MutableStateFlow(false)
     val isEditMode = _isEditMode.asStateFlow()
 
+    private val _publicShoutEnabled = MutableStateFlow(settingsManager.isPublicShoutEnabled)
+    val publicShoutEnabled = _publicShoutEnabled.asStateFlow()
+
     private val _bio = MutableStateFlow(settingsManager.bio ?: "")
     val bio = _bio.asStateFlow()
 
@@ -126,6 +129,11 @@ class SettingsViewModel(
         updateDisplayName(name)
         updateBio(bio)
         setEditMode(false)
+    }
+
+    fun setPublicShoutEnabled(enabled: Boolean) {
+        settingsManager.isPublicShoutEnabled = enabled
+        _publicShoutEnabled.value = enabled
     }
 
     fun deleteAllMessages() {

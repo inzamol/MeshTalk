@@ -19,10 +19,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import `in`.inzamulhoque.meshtalk.data.local.entity.Peer
+import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
 import android.util.Base64
 import coil.compose.AsyncImage
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -119,13 +121,13 @@ fun PeerListPane(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(peers, key = { it.deviceAddress ?: it.id }) { peer ->
+                    items(peers, key = { it.peer.deviceAddress ?: it.peer.id }) { model ->
                         PeerItem(
-                            peer = peer,
+                            model = model,
                             showConnectingDevices = showConnectingDevices,
-                            isActive = activePeerAddresses.contains(peer.deviceAddress),
-                            onClick = { onPeerClick(peer.id) },
-                            onLongClick = { peerToDelete = peer }
+                            isActive = activePeerAddresses.contains(model.peer.deviceAddress),
+                            onClick = { onPeerClick(model.peer.id) },
+                            onLongClick = { peerToDelete = model.peer }
                         )
                     }
                 }
@@ -157,8 +159,10 @@ fun PeerListPane(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PeerItem(peer: Peer, showConnectingDevices: Boolean, isActive: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+fun PeerItem(model: PeerUiModel, showConnectingDevices: Boolean, isActive: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val peer = model.peer
     val isHandshaked = !peer.encryptionKey.isNullOrBlank()
+    val hasUnread = model.unreadCount > 0
     val displayName = if (!isHandshaked && !showConnectingDevices && (peer.displayName == "Connecting..." || peer.displayName == "Mesh Peer")) {
         "Mesh Peer"
     } else {
@@ -171,17 +175,21 @@ fun PeerItem(peer: Peer, showConnectingDevices: Boolean, isActive: Boolean, onCl
                 Text(
                     text = displayName,
                     style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f)
+                    fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
                 if (peer.isVerified) {
+                    Spacer(modifier = Modifier.width(4.dp))
                     Icon(
                         Icons.Rounded.Verified,
                         contentDescription = "Verified",
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
                 }
+                Spacer(modifier = Modifier.weight(1f))
                 if (isHandshaked) {
                     val rssiIcon = when {
                         peer.rssi > -60 -> Icons.Rounded.SignalCellularAlt
@@ -198,7 +206,9 @@ fun PeerItem(peer: Peer, showConnectingDevices: Boolean, isActive: Boolean, onCl
             }
         },
         supportingContent = { 
-            val statusText = if (isHandshaked) {
+            val statusText = if (model.lastMessage != null) {
+                model.lastMessage
+            } else if (isHandshaked) {
                 peer.bio ?: (peer.id.take(16) + "...")
             } else if (showConnectingDevices) {
                 "Connecting / Handshaking..."
@@ -206,21 +216,23 @@ fun PeerItem(peer: Peer, showConnectingDevices: Boolean, isActive: Boolean, onCl
                 peer.id.take(16) + "..."
             }
             Text(
-                statusText,
+                statusText ?: "",
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (hasUnread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
             ) 
         },
         leadingContent = {
             Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                 if (peer.avatarUri != null) {
-                    val model = if (peer.avatarUri.startsWith("/")) {
+                    val avatarModel = if (peer.avatarUri.startsWith("/")) {
                         peer.avatarUri
                     } else {
                         try { Base64.decode(peer.avatarUri, Base64.DEFAULT) } catch (e: Exception) { null }
                     }
                     AsyncImage(
-                        model = model,
+                        model = avatarModel,
                         contentDescription = null,
                         modifier = Modifier.size(40.dp).clip(CircleShape),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -234,7 +246,7 @@ fun PeerItem(peer: Peer, showConnectingDevices: Boolean, isActive: Boolean, onCl
                     )
                 }
                 
-                if (!isHandshaked) {
+                if (!isHandshaked && peer.id != MeshProtocol.PUBLIC_GROUP_ID) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(32.dp),
                         strokeWidth = 2.dp,
@@ -253,8 +265,18 @@ fun PeerItem(peer: Peer, showConnectingDevices: Boolean, isActive: Boolean, onCl
                 }
             }
         },
+        trailingContent = {
+            if (hasUnread) {
+                Badge(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Text(model.unreadCount.toString())
+                }
+            }
+        },
         modifier = Modifier
-            .alpha(if (isHandshaked) 1f else 1f) // Keep full alpha to see the indicator clearly
+            .alpha(if (isHandshaked) 1f else 1f) 
             .combinedClickable(
                 onClick = { if (isHandshaked) onClick() },
                 onLongClick = onLongClick

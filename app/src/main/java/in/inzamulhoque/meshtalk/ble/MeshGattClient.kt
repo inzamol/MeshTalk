@@ -6,7 +6,9 @@ import android.bluetooth.*
 import android.content.Context
 import android.util.Log
 import androidx.annotation.RequiresPermission
+import `in`.inzamulhoque.meshtalk.data.local.entity.Message
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+import `in`.inzamulhoque.meshtalk.protocol.proto.*
 import `in`.inzamulhoque.meshtalk.util.PermissionUtils
 import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import kotlinx.coroutines.*
@@ -277,31 +279,31 @@ class MeshGattClient(
                         if (currentOffset == fullData.size) {
                             Log.d("MeshGattClient", "Reassembled incoming data from ${device.address}")
                             
-                            val handshake = protocol.deserializeHandshake(fullData)
-                            if (handshake != null) {
-                                scope.launch {
-                                    val messagesToSync = protocol.handleHandshake(handshake, device.address)
-                                    messagesToSync.forEach { msg ->
-                                        sendData(protocol.serializeMessage(msg))
+                            val packet = protocol.parsePacket(fullData)
+                            when (packet) {
+                                is ProtoHandshake -> {
+                                    scope.launch {
+                                        val messagesToSync = protocol.handleHandshake(packet, device.address)
+                                        messagesToSync.forEach { msg ->
+                                            sendData(protocol.serializeMessage(msg))
+                                        }
+                                        cancelConnectionTimeout()
                                     }
-                                    cancelConnectionTimeout() // Handshake complete, stop connection timer
                                 }
-                            } else {
-                                scope.launch {
-                                    val message = protocol.deserializeMessage(fullData)
-                                    if (message != null) {
-                                        val (reply, forward) = protocol.processReceivedMessage(message)
+                                is Message -> {
+                                    scope.launch {
+                                        val (reply, forward) = protocol.processReceivedMessage(packet)
                                         if (reply != null) {
                                             sendData(protocol.serializeSyncUpdate(reply))
                                         }
                                         if (forward != null) {
                                             networkManagerProvider()?.forwardToOthers(forward, device.address)
                                         }
-                                        return@launch
                                     }
-                                    val syncUpdate = protocol.deserializeSyncUpdate(fullData)
-                                    if (syncUpdate != null) {
-                                        protocol.processSyncUpdate(syncUpdate)
+                                }
+                                is ProtoSyncUpdate -> {
+                                    scope.launch {
+                                        protocol.processSyncUpdate(packet)
                                     }
                                 }
                             }

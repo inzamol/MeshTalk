@@ -12,7 +12,7 @@ import `in`.inzamulhoque.meshtalk.util.PermissionUtils
 class MeshBLEManager(
     private val context: Context,
     private val bluetoothAdapter: BluetoothAdapter,
-    private val myShortId: ByteArray,
+    private var myShortId: ByteArray,
     private val onPeerDiscovered: (String, ByteArray, Int) -> Unit, // deviceAddress, peerShortId, rssi
 ) {
     private var isScanning = false
@@ -112,6 +112,14 @@ class MeshBLEManager(
             isScanning = false
         } catch (e: SecurityException) {
             Log.e("MeshBLEManager", "Permission denied for stopping scanning", e)
+        }
+    }
+
+    fun updateAdvertisingId(newId: ByteArray) {
+        myShortId = newId
+        if (isAdvertising) {
+            stopAdvertising()
+            startAdvertising()
         }
     }
 

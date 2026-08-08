@@ -49,18 +49,27 @@ class ChatViewModel(
         messageDao.getMessagesForPeer(peerId)
     }).onEach { list ->
             // Mark unread incoming messages as READ
-            val unread = list.filter { it.receiverId == myId && it.status != MessageStatus.READ }
+            val isPublic = peerId == MeshProtocol.PUBLIC_GROUP_ID
+            val unread = list.filter { 
+                val isIncoming = if (isPublic) it.senderId != myId else it.receiverId == myId
+                isIncoming && it.status != MessageStatus.READ 
+            }
+            
             if (unread.isNotEmpty()) {
                 unread.forEach { msg ->
                     messageDao.updateMessageStatus(msg.id, MessageStatus.READ.name)
-                    meshNetworkManager.broadcastSyncUpdate(
-                        ProtoSyncUpdate.newBuilder()
-                            .setType(SyncUpdateType.READ)
-                            .setTargetUuid(msg.uuid)
-                            .setSenderId(myId)
-                            .setTimestamp(System.currentTimeMillis())
-                            .build()
-                    )
+                    
+                    // Only broadcast READ receipts for private chats
+                    if (!isPublic) {
+                        meshNetworkManager.broadcastSyncUpdate(
+                            ProtoSyncUpdate.newBuilder()
+                                .setType(SyncUpdateType.READ)
+                                .setTargetUuid(msg.uuid)
+                                .setSenderId(myId)
+                                .setTimestamp(System.currentTimeMillis())
+                                .build()
+                        )
+                    }
                 }
             }
         }
@@ -205,6 +214,15 @@ class ChatViewModel(
             val p = peerDao.getPeerById(peerId)
             if (p != null) {
                 peerDao.deletePeer(p)
+            }
+        }
+    }
+
+    fun verifyCurrentPeer() {
+        viewModelScope.launch {
+            val p = peerDao.getPeerById(peerId)
+            if (p != null) {
+                peerDao.updatePeer(p.copy(isVerified = true))
             }
         }
     }
