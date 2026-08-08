@@ -43,6 +43,10 @@ fun SettingsPane(
     val forwardingEnabled by viewModel.forwardingEnabled.collectAsState()
     val connectionToastEnabled by viewModel.connectionToastEnabled.collectAsState()
     val showConnectingDevicesEnabled by viewModel.showConnectingDevicesEnabled.collectAsState()
+    val movementSensingEnabled by viewModel.movementSensingEnabled.collectAsState()
+    val pruneOthersDays by viewModel.pruneOthersDays.collectAsState()
+    val pruneOwnEnabled by viewModel.pruneOwnEnabled.collectAsState()
+    val pruneOwnDays by viewModel.pruneOwnDays.collectAsState()
     
     var showDeleteMessagesDialog by remember { mutableStateOf(false) }
     var showDeletePeersDialog by remember { mutableStateOf(false) }
@@ -213,6 +217,48 @@ fun SettingsPane(
                     onCheckedChange = { viewModel.setShowConnectingDevicesEnabled(it) },
                     icon = Icons.Rounded.SwapHoriz
                 )
+
+                SettingsToggleItem(
+                    title = "Adaptive Scanning",
+                    subtitle = "Search more frequently when moving, less when stationary",
+                    checked = movementSensingEnabled,
+                    onCheckedChange = { viewModel.setMovementSensingEnabled(it) },
+                    icon = Icons.Rounded.DirectionsRun
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Message Pruning", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                
+                Column(modifier = Modifier.padding(horizontal = 8.dp)) {
+                    Text("Auto-delete others' messages after $pruneOthersDays days", style = MaterialTheme.typography.bodyLarge)
+                    Text("Received messages will be deleted. Your own messages are kept unless specified below.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Slider(
+                        value = pruneOthersDays.toFloat(),
+                        onValueChange = { viewModel.setPruneOthersDays(it.toInt()) },
+                        valueRange = 7f..365f,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                SettingsToggleItem(
+                    title = "Auto-delete my own messages",
+                    subtitle = "Enable to prune your own old sent history",
+                    checked = pruneOwnEnabled,
+                    onCheckedChange = { viewModel.setPruneOwnEnabled(it) },
+                    icon = Icons.Rounded.History
+                )
+                
+                if (pruneOwnEnabled) {
+                    Column(modifier = Modifier.padding(horizontal = 8.dp)) {
+                        Text("Delete my messages after $pruneOwnDays days", style = MaterialTheme.typography.bodyLarge)
+                        Slider(
+                            value = pruneOwnDays.toFloat(),
+                            onValueChange = { viewModel.setPruneOwnDays(it.toInt()) },
+                            valueRange = 30f..730f,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Text("Data Management", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)

@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package in.inzamulhoque.meshtalk.protocol.proto;
+
+option java_multiple_files = true;
+option java_package = "in.inzamulhoque.meshtalk.protocol.proto";
+
+message ProtoMessage {
+  string uuid = 1;
+  string sender_id = 2;
+  string receiver_id = 3;
+  optional string group_id = 4;
+  string content = 5;
+  int64 timestamp = 6;
+  int64 expiry_timestamp = 7;
+  int32 hop_count = 8;
+  bool is_encrypted = 9;
+}
+
+message ProtoHandshake {
+  string peer_id = 1;
+  string encryption_key = 2;
+  string display_name = 3;
+  bytes bloom_filter = 4;
+  optional string bio = 5;
+  optional string avatar_base64 = 6;
+}
+
+enum SyncUpdateType {
+  DELETE_MESSAGE = 0;
+  DELIVERED = 1;
+  READ = 2;
+}
+
+message ProtoSyncUpdate {
+  SyncUpdateType type = 1;
+  string target_uuid = 2;
+  string sender_id = 3;
+  int64 timestamp = 4;
+}

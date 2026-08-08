@@ -35,6 +35,18 @@ class SettingsViewModel(
     private val _showConnectingDevicesEnabled = MutableStateFlow(settingsManager.isShowConnectingDevicesEnabled)
     val showConnectingDevicesEnabled = _showConnectingDevicesEnabled.asStateFlow()
 
+    private val _pruneOthersDays = MutableStateFlow(settingsManager.pruneOthersMessagesDays)
+    val pruneOthersDays = _pruneOthersDays.asStateFlow()
+
+    private val _pruneOwnEnabled = MutableStateFlow(settingsManager.isPruningOwnMessagesEnabled)
+    val pruneOwnEnabled = _pruneOwnEnabled.asStateFlow()
+
+    private val _pruneOwnDays = MutableStateFlow(settingsManager.pruneOwnMessagesDays)
+    val pruneOwnDays = _pruneOwnDays.asStateFlow()
+
+    private val _movementSensingEnabled = MutableStateFlow(settingsManager.isMovementSensingEnabled)
+    val movementSensingEnabled = _movementSensingEnabled.asStateFlow()
+
     private val _bio = MutableStateFlow(settingsManager.bio ?: "")
     val bio = _bio.asStateFlow()
 
@@ -80,6 +92,27 @@ class SettingsViewModel(
     fun setShowConnectingDevicesEnabled(enabled: Boolean) {
         settingsManager.isShowConnectingDevicesEnabled = enabled
         _showConnectingDevicesEnabled.value = enabled
+    }
+
+    fun setPruneOthersDays(days: Int) {
+        settingsManager.pruneOthersMessagesDays = days
+        _pruneOthersDays.value = days
+    }
+
+    fun setPruneOwnEnabled(enabled: Boolean) {
+        settingsManager.isPruningOwnMessagesEnabled = enabled
+        _pruneOwnEnabled.value = enabled
+    }
+
+    fun setPruneOwnDays(days: Int) {
+        settingsManager.pruneOwnMessagesDays = days
+        _pruneOwnDays.value = days
+    }
+
+    fun setMovementSensingEnabled(enabled: Boolean) {
+        settingsManager.isMovementSensingEnabled = enabled
+        _movementSensingEnabled.value = enabled
+        meshNetworkManager.updateScanningState() // Scanning logic will now check movement
     }
 
     fun deleteAllMessages() {

@@ -47,4 +47,17 @@ interface MessageDao {
 
     @Query("UPDATE messages SET status = 'FAILED' WHERE status = 'PENDING' AND timestamp < :timeoutLimit")
     suspend fun markTimedOutMessagesAsFailed(timeoutLimit: Long)
+
+    @Query("DELETE FROM messages WHERE senderId != :myId AND timestamp < :threshold")
+    suspend fun pruneOthersMessages(myId: String, threshold: Long)
+
+    @Query("DELETE FROM messages WHERE senderId = :myId AND timestamp < :threshold")
+    suspend fun pruneOwnMessages(myId: String, threshold: Long)
+
+    @Query("""
+        SELECT * FROM messages 
+        JOIN messages_fts ON messages.content = messages_fts.content
+        WHERE messages_fts MATCH :query
+    """)
+    fun searchMessages(query: String): Flow<List<Message>>
 }
