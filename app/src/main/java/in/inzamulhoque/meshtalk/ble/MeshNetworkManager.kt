@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import java.nio.ByteBuffer
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -43,10 +44,8 @@ class MeshNetworkManager(
         settingsManager = settingsManager
     )
 
-    private val myShortId = String.format("%08x", identityManager.getMyId().hashCode()).toByteArray()
-
     private val bleManager = bluetoothAdapter?.let { adapter ->
-        MeshBLEManager(context, adapter, myShortId) { deviceAddress, peerShortId, rssi ->
+        MeshBLEManager(context, adapter, identityManager.getStealthId()) { deviceAddress, peerShortId, rssi ->
             onPeerSeen(deviceAddress, peerShortId, rssi)
         }
     }
@@ -88,9 +87,10 @@ class MeshNetworkManager(
     private var autoReconnectJob: kotlinx.coroutines.Job? = null
     private var timeoutCheckJob: kotlinx.coroutines.Job? = null
     private var pruningJob: kotlinx.coroutines.Job? = null
+    private var rotationJob: kotlinx.coroutines.Job? = null
 
     fun start() {
-        Log.d("MeshNetworkManager", "Starting MeshNetworkManager. myIdHash: ${String(myShortId)}")
+        Log.d("MeshNetworkManager", "Starting MeshNetworkManager. Stealth ID: ${identityManager.getStealthId().joinToString("") { "%02x".format(it) }}")
         myDisplayName = identityManager.getDisplayName()
         
         if (bluetoothAdapter?.isEnabled == true) {
@@ -105,6 +105,7 @@ class MeshNetworkManager(
             startAutoReconnectLoop()
             startTimeoutCheckLoop()
             startPruningLoop()
+            startRotationLoop()
         }
     }
 
@@ -169,6 +170,23 @@ class MeshNetworkManager(
         }
     }
 
+    private fun startRotationLoop() {
+        rotationJob?.cancel()
+        rotationJob = scope.launch {
+            while (true) {
+                val now = System.currentTimeMillis()
+                val windowMs = 15 * 60 * 1000
+                val nextWindow = ((now / windowMs) + 1) * windowMs
+                
+                // Sleep until next window
+                delay(nextWindow - now + 1000) 
+                
+                Log.d("MeshNetworkManager", "Rotating Stealth ID...")
+                bleManager?.updateAdvertisingId(identityManager.getStealthId())
+            }
+        }
+    }
+
     private fun startAutoReconnectLoop() {
         autoReconnectJob?.cancel()
         autoReconnectJob = scope.launch {
@@ -215,6 +233,7 @@ class MeshNetworkManager(
         autoReconnectJob?.cancel()
         timeoutCheckJob?.cancel()
         pruningJob?.cancel()
+        rotationJob?.cancel()
         movementDetector.stop()
         bleManager?.stopAdvertising()
         bleManager?.stopScanning()
@@ -232,7 +251,9 @@ class MeshNetworkManager(
     }
 
     private fun onPeerSeen(deviceAddress: String, peerShortId: ByteArray, rssi: Int) {
-        if (peerShortId.contentEquals(myShortId)) return
+        // If we are seeing our own current stealth ID, ignore it
+        val myStealthId = identityManager.getStealthId()
+        if (peerShortId.contentEquals(myStealthId)) return
         
         scope.launch {
             val existing = database.peerDao().getPeerByAddress(deviceAddress)
@@ -245,9 +266,9 @@ class MeshNetworkManager(
                 database.peerDao().updatePeer(existing.copy(lastSeen = now, rssi = rssi))
             }
             
-            val myIdHash = java.lang.Long.parseLong(String(myShortId), 16)
+            val myIdHash = if (myStealthId.size >= 4) ByteBuffer.wrap(myStealthId).int.toLong() and 0xFFFFFFFFL else 0L
             val peerIdHash = try { 
-                if (peerShortId.isNotEmpty()) java.lang.Long.parseLong(String(peerShortId), 16) 
+                if (peerShortId.size >= 4) ByteBuffer.wrap(peerShortId).int.toLong() and 0xFFFFFFFFL
                 else java.lang.Long.parseLong(deviceAddress.replace(":", ""), 16)
             } catch (e: Exception) { 0L }
             

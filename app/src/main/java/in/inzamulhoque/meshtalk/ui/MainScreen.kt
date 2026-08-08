@@ -59,8 +59,11 @@ fun MainScreen(
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 return HomeViewModel(
                     app.database.peerDao(), 
+                    app.database.messageDao(),
                     app.settingsManager,
-                    app.meshNetworkManager.connectedPeerAddresses
+                    app.identityManager,
+                    app.meshNetworkManager.connectedPeerAddresses,
+                    myId
                 ) as T
             }
         }
@@ -73,9 +76,7 @@ fun MainScreen(
     }
 
     LaunchedEffect(navigator.currentDestination) {
-        if (navigator.currentDestination == null || navigator.currentDestination?.contentKey is NavRoute.Chat) {
-            homeViewModel.refreshSettings()
-        }
+        homeViewModel.refreshSettings()
     }
 
     LaunchedEffect(initialPeerId) {
@@ -176,9 +177,9 @@ fun MainScreen(
                         )
                     }
                     is NavRoute.CreateGroup -> {
-                        val peers by homeViewModel.peers.collectAsState()
+                        val peerModels by homeViewModel.peers.collectAsState()
                         `in`.inzamulhoque.meshtalk.ui.chat.CreateGroupPane(
-                            peers = peers,
+                            peers = peerModels.map { it.peer },
                             onCreateGroup = { name, members ->
                                 coroutineScope.launch {
                                     val groupId = java.util.UUID.randomUUID().toString()

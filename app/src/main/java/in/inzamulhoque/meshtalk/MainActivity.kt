@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager
+import `in`.inzamulhoque.meshtalk.service.MeshForegroundService
 import `in`.inzamulhoque.meshtalk.ui.MainScreen
 import `in`.inzamulhoque.meshtalk.ui.theme.MeshTalkTheme
 import `in`.inzamulhoque.meshtalk.util.PermissionUtils
@@ -84,7 +85,7 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(permissionState.allPermissionsGranted, isBluetoothEnabled, isLocationEnabled) {
                     if (permissionState.allPermissionsGranted && isBluetoothEnabled && isLocationEnabled) {
-                        (application as MeshApplication).meshNetworkManager.start()
+                        MeshForegroundService.start(this@MainActivity)
                     }
                 }
 
@@ -163,7 +164,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        (application as? MeshApplication)?.meshNetworkManager?.stop()
     }
 }
 

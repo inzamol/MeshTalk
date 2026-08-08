@@ -53,4 +53,8 @@ class SettingsManager(context: Context) {
     var isMovementSensingEnabled: Boolean
         get() = prefs.getBoolean("movement_sensing_enabled", true)
         set(value) = prefs.edit().putBoolean("movement_sensing_enabled", value).apply()
+
+    var isPublicShoutEnabled: Boolean
+        get() = prefs.getBoolean("public_shout_enabled", false)
+        set(value) = prefs.edit().putBoolean("public_shout_enabled", value).apply()
 }

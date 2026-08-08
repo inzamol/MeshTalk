@@ -51,6 +51,7 @@ fun SettingsPane(
     val pruneOwnEnabled by viewModel.pruneOwnEnabled.collectAsState()
     val pruneOwnDays by viewModel.pruneOwnDays.collectAsState()
     val isEditMode by viewModel.isEditMode.collectAsState()
+    val publicShoutEnabled by viewModel.publicShoutEnabled.collectAsState()
     
     var showDeleteMessagesDialog by remember { mutableStateOf(false) }
     var showDeletePeersDialog by remember { mutableStateOf(false) }
@@ -306,6 +307,14 @@ fun SettingsPane(
                     checked = showConnectingDevicesEnabled,
                     onCheckedChange = { viewModel.setShowConnectingDevicesEnabled(it) },
                     icon = Icons.Rounded.SwapHoriz
+                )
+
+                SettingsToggleItem(
+                    title = "Public Shout",
+                    subtitle = "Enable to send and receive broadcast messages nearby",
+                    checked = publicShoutEnabled,
+                    onCheckedChange = { viewModel.setPublicShoutEnabled(it) },
+                    icon = Icons.Rounded.Campaign
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
