@@ -47,6 +47,9 @@ class SettingsViewModel(
     private val _movementSensingEnabled = MutableStateFlow(settingsManager.isMovementSensingEnabled)
     val movementSensingEnabled = _movementSensingEnabled.asStateFlow()
 
+    private val _isEditMode = MutableStateFlow(false)
+    val isEditMode = _isEditMode.asStateFlow()
+
     private val _bio = MutableStateFlow(settingsManager.bio ?: "")
     val bio = _bio.asStateFlow()
 
@@ -115,6 +118,16 @@ class SettingsViewModel(
         meshNetworkManager.updateScanningState() // Scanning logic will now check movement
     }
 
+    fun setEditMode(enabled: Boolean) {
+        _isEditMode.value = enabled
+    }
+
+    fun saveProfile(name: String, bio: String) {
+        updateDisplayName(name)
+        updateBio(bio)
+        setEditMode(false)
+    }
+
     fun deleteAllMessages() {
         viewModelScope.launch {
             database.messageDao().deleteAllMessages()
@@ -127,12 +140,29 @@ class SettingsViewModel(
         }
     }
 
-    fun verifyPeer(peerId: String) {
+    fun verifyPeer(qrResult: String): String {
+        val parts = qrResult.split(":")
+        val (peerId, name) = if (parts.size >= 3 && parts[0] == "mt") {
+            parts[1] to parts[2]
+        } else {
+            qrResult to "Verified Peer"
+        }
+
         viewModelScope.launch {
-            val peer = database.peerDao().getPeerById(peerId)
-            if (peer != null) {
-                database.peerDao().updatePeer(peer.copy(isVerified = true))
+            val existing = database.peerDao().getPeerById(peerId)
+            if (existing != null) {
+                database.peerDao().updatePeer(existing.copy(isVerified = true, displayName = if (existing.displayName == "Mesh Peer" || existing.displayName == "Connecting...") name else existing.displayName))
+            } else {
+                database.peerDao().insertPeer(`in`.inzamulhoque.meshtalk.data.local.entity.Peer(
+                    id = peerId,
+                    publicKey = peerId,
+                    displayName = name,
+                    deviceAddress = null,
+                    isVerified = true,
+                    bio = "Added via QR"
+                ))
             }
         }
+        return peerId
     }
 }

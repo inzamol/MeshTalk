@@ -34,6 +34,7 @@ fun PeerListPane(
     onSettingsClick: () -> Unit,
     onCreateGroupClick: () -> Unit,
     onRefresh: () -> Unit,
+    onAddPeerClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val peers by viewModel.peers.collectAsState()
@@ -60,8 +61,21 @@ fun PeerListPane(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onCreateGroupClick) {
-                Icon(Icons.Rounded.GroupAdd, contentDescription = "Create Group")
+            Column(horizontalAlignment = Alignment.End) {
+                FloatingActionButton(
+                    onClick = onCreateGroupClick,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                ) {
+                    Icon(Icons.Rounded.GroupAdd, contentDescription = "Create Group")
+                }
+                
+                ExtendedFloatingActionButton(
+                    onClick = onAddPeerClick,
+                    icon = { Icon(Icons.Rounded.QrCodeScanner, contentDescription = null) },
+                    text = { Text("Add Peer") }
+                )
             }
         }
     ) { innerPadding ->

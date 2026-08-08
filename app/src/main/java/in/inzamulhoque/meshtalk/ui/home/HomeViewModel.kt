@@ -57,4 +57,30 @@ class HomeViewModel(
             peerDao.deletePeer(peer)
         }
     }
+
+    fun verifyPeer(qrResult: String): String {
+        val parts = qrResult.split(":")
+        val (peerId, name) = if (parts.size >= 3 && parts[0] == "mt") {
+            parts[1] to parts[2]
+        } else {
+            qrResult to "Verified Peer"
+        }
+
+        viewModelScope.launch {
+            val existing = peerDao.getPeerById(peerId)
+            if (existing != null) {
+                peerDao.updatePeer(existing.copy(isVerified = true, displayName = if (existing.displayName == "Mesh Peer" || existing.displayName == "Connecting...") name else existing.displayName))
+            } else {
+                peerDao.insertPeer(Peer(
+                    id = peerId,
+                    publicKey = peerId,
+                    displayName = name,
+                    deviceAddress = null,
+                    isVerified = true,
+                    bio = "Added via QR"
+                ))
+            }
+        }
+        return peerId
+    }
 }

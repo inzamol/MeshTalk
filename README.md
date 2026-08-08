@@ -17,6 +17,7 @@
     *   **Bloom Filters**: Uses 512-bit Bloom Filters for ultra-efficient message synchronization.
 -   **Advanced UI & Performance**:
     *   **Active Status Indicator**: Real-time visual feedback (green dot) when a peer is actively connected in the mesh.
+    *   **QR Verification**: A revamped QR system for adding and verifying peers efficiently.
     *   **FTS5 Search**: Instantaneous search across millions of messages using SQLite Full-Text Search.
     *   **Adaptive UI**: Modern Material 3 interface that scales from phones to foldables and tablets.
 
@@ -41,8 +42,8 @@ Mesh Talk implements industrial-grade optimizations for decentralized communicat
 
 ### Prerequisites
 - **Android Device**: Running Android 12 (API 31) or higher.
-- **Hardware**: Bluetooth Low Energy (BLE) support.
-- **Permissions**: Bluetooth (Scan, Advertise, Connect), Location (required for BLE), and Nearby Devices.
+- **Hardware**: Bluetooth Low Energy (BLE) support and a Camera (for QR verification).
+- **Permissions**: Bluetooth (Scan, Advertise, Connect), Location (required for BLE), Camera (for adding peers), and Nearby Devices.
 
 ### Build from Source
 1.  **Clone the repository**:
