@@ -15,12 +15,20 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager
@@ -37,11 +45,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         val app = application as MeshApplication
-        val myId = app.identityManager.getMyId()
-
+        
         enableEdgeToEdge()
         setContent {
             MeshTalkTheme {
+                val initError = app.initializationError
+                if (initError != null) {
+                    FatalErrorScreen(error = initError)
+                    return@MeshTalkTheme
+                }
+
+                val myId = app.identityManager.getMyId()
                 val permissions = PermissionUtils.getRequiredPermissions()
                 val permissionState = rememberMultiplePermissionsState(permissions)
 
@@ -150,5 +164,55 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         (application as? MeshApplication)?.meshNetworkManager?.stop()
+    }
+}
+
+@Composable
+fun FatalErrorScreen(error: Throwable) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.errorContainer
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = androidx.compose.material.icons.Icons.Default.Error,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(64.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Fatal Initialization Error",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "The application failed to start correctly. This usually happens due to issues with the Android Keystore or Database.",
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Surface(
+                color = Color.Black.copy(alpha = 0.1f),
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = Log.getStackTraceString(error),
+                    modifier = Modifier.padding(16.dp),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        }
     }
 }

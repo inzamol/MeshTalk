@@ -42,6 +42,7 @@ fun SettingsPane(
     val continuousSearchEnabled by viewModel.continuousSearchEnabled.collectAsState()
     val forwardingEnabled by viewModel.forwardingEnabled.collectAsState()
     val connectionToastEnabled by viewModel.connectionToastEnabled.collectAsState()
+    val showConnectingDevicesEnabled by viewModel.showConnectingDevicesEnabled.collectAsState()
     
     var showDeleteMessagesDialog by remember { mutableStateOf(false) }
     var showDeletePeersDialog by remember { mutableStateOf(false) }
@@ -203,6 +204,14 @@ fun SettingsPane(
                     checked = connectionToastEnabled,
                     onCheckedChange = { viewModel.setConnectionToastEnabled(it) },
                     icon = Icons.Rounded.Info
+                )
+
+                SettingsToggleItem(
+                    title = "Show connecting devices",
+                    subtitle = "Show peers that are currently connecting in the list",
+                    checked = showConnectingDevicesEnabled,
+                    onCheckedChange = { viewModel.setShowConnectingDevicesEnabled(it) },
+                    icon = Icons.Rounded.SwapHoriz
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))

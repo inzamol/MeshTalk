@@ -11,12 +11,13 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.milliseconds
 
 class MeshGattServer(
     private val context: Context,
-    private val bluetoothManager: BluetoothManager,
+    private val bluetoothManager: BluetoothManager?,
     private val protocol: MeshProtocol,
     private val myId: String,
     private val myEncryptionKey: String,
@@ -33,6 +34,9 @@ class MeshGattServer(
     private val reassemblyBuffers = ConcurrentHashMap<String, ReassemblyBuffer>()
     private val connectedDevices = mutableSetOf<BluetoothDevice>()
 
+    private val _connectedAddresses = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+    val connectedAddresses = _connectedAddresses.asStateFlow()
+
     data class ReassemblyBuffer(
         val msgId: Byte,
         val total: Int,
@@ -44,13 +48,15 @@ class MeshGattServer(
     fun start() {
         if (gattServer != null) return
         
+        _connectedAddresses.value = emptySet()
+        
         if (!PermissionUtils.hasPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) ||
             !PermissionUtils.hasPermission(context, Manifest.permission.BLUETOOTH_CONNECT)) {
             return
         }
 
         try {
-            gattServer = bluetoothManager.openGattServer(context, gattServerCallback)
+            gattServer = bluetoothManager?.openGattServer(context, gattServerCallback)
             val service = BluetoothGattService(MeshConstants.SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
             service.addCharacteristic(BluetoothGattCharacteristic(MeshConstants.IDENTITY_CHAR_UUID, BluetoothGattCharacteristic.PROPERTY_READ, BluetoothGattCharacteristic.PERMISSION_READ))
             service.addCharacteristic(BluetoothGattCharacteristic(MeshConstants.ENCRYPTION_KEY_CHAR_UUID, BluetoothGattCharacteristic.PROPERTY_READ, BluetoothGattCharacteristic.PERMISSION_READ))
@@ -108,7 +114,7 @@ class MeshGattServer(
                 
                 char.value = chunk
                 gattServer?.notifyCharacteristicChanged(device, char, false)
-                kotlinx.coroutines.delay(50.milliseconds) 
+                kotlinx.coroutines.delay(15.milliseconds) // Reduced delay for faster transmission
             }
         }
     }
@@ -122,6 +128,7 @@ class MeshGattServer(
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 connectedDevices.remove(dev)
             }
+            _connectedAddresses.value = connectedDevices.map { it.address }.toSet()
         }
 
         @SuppressLint("MissingPermission")

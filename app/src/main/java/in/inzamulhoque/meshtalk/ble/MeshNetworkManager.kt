@@ -5,16 +5,19 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.util.Log
 import `in`.inzamulhoque.meshtalk.crypto.IdentityManager
-import `in`.inzamulhoque.meshtalk.util.SettingsManager
 import `in`.inzamulhoque.meshtalk.data.local.AppDatabase
-import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
 import `in`.inzamulhoque.meshtalk.data.local.entity.Message
 import `in`.inzamulhoque.meshtalk.data.local.entity.MessageStatus
+import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+import `in`.inzamulhoque.meshtalk.util.SettingsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlin.time.Duration.Companion.seconds
 
 class MeshNetworkManager(
@@ -23,8 +26,8 @@ class MeshNetworkManager(
     private val identityManager: IdentityManager,
     private val settingsManager: SettingsManager
 ) {
-    private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
+    private val bluetoothManager = context.getSystemService(BluetoothManager::class.java)
+    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
     
     private val protocol = MeshProtocol(
         context = context,
@@ -61,6 +64,16 @@ class MeshNetworkManager(
 
     private val scope = CoroutineScope(Dispatchers.IO)
     private val activeClients = mutableMapOf<String, MeshGattClient>()
+    
+    private val _activeAddresses = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+    val activeAddresses = _activeAddresses.asStateFlow()
+
+    val connectedPeerAddresses = combine(
+        activeAddresses,
+        gattServer.connectedAddresses
+    ) { active, server ->
+        active + server
+    }.stateIn(scope, SharingStarted.Eagerly, emptySet())
     private val connectionCooldowns = mutableMapOf<String, Long>()
     private var autoReconnectJob: kotlinx.coroutines.Job? = null
     private var timeoutCheckJob: kotlinx.coroutines.Job? = null
@@ -138,6 +151,7 @@ class MeshNetworkManager(
         gattServer.stop()
         activeClients.values.forEach { it.disconnect() }
         activeClients.clear()
+        _activeAddresses.value = emptySet()
     }
 
     fun connectToPeerById(peerId: String) {
@@ -155,7 +169,8 @@ class MeshNetworkManager(
             val now = System.currentTimeMillis()
 
             if (existing == null) {
-                protocol.onPeerDiscovered(deviceAddress, "", null, "Connecting...", deviceAddress, rssi = rssi)
+                val initialName = if (settingsManager.isShowConnectingDevicesEnabled) "Connecting..." else "Mesh Peer"
+                protocol.onPeerDiscovered(deviceAddress, "", null, initialName, deviceAddress, rssi = rssi)
             } else if (now - existing.lastSeen > 10000 || Math.abs(existing.rssi - rssi) > 5) {
                 database.peerDao().updatePeer(existing.copy(lastSeen = now, rssi = rssi))
             }
@@ -187,9 +202,11 @@ class MeshNetworkManager(
             val client = MeshGattClient(context, device, protocol, identityManager.getMyEncryptionKey(), identityManager.getDisplayName(), { this }) {
                 synchronized(activeClients) {
                     activeClients.remove(deviceAddress)
+                    _activeAddresses.value = activeClients.keys.toSet()
                 }
             }
             activeClients[deviceAddress] = client
+            _activeAddresses.value = activeClients.keys.toSet()
             client.connect()
         }
     }
@@ -198,10 +215,22 @@ class MeshNetworkManager(
         val json = protocol.serializeMessage(message)
         scope.launch {
             var sent = false
+            
+            // Try sending to currently active clients
             activeClients.values.forEach { client ->
                 client.sendData(json)
                 sent = true
             }
+            
+            // If no active clients, try to connect to known nearby peers immediately
+            if (!sent) {
+                val peers = database.peerDao().getAllPeersSync()
+                val now = System.currentTimeMillis()
+                peers.filter { it.deviceAddress != null && now - it.lastSeen < 60000 }.forEach { peer ->
+                    connectToPeer(peer.deviceAddress!!, force = true)
+                }
+            }
+
             gattServer.broadcastData(json)
             if (gattServer.getConnectedDevicesCount() > 0) sent = true
 

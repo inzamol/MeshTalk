@@ -22,6 +22,7 @@ import `in`.inzamulhoque.meshtalk.ui.home.PeerListPane
 import `in`.inzamulhoque.meshtalk.ui.navigation.NavRoute
 import `in`.inzamulhoque.meshtalk.ui.settings.SettingsPane
 import `in`.inzamulhoque.meshtalk.ui.settings.SettingsViewModel
+import `in`.inzamulhoque.meshtalk.ui.onboarding.WelcomePane
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -37,11 +38,28 @@ fun MainScreen(
     val scaffoldDirective = calculatePaneScaffoldDirective(currentWindowAdaptiveInfo())
     val navigator = rememberListDetailPaneScaffoldNavigator<NavRoute>(scaffoldDirective)
     val coroutineScope = rememberCoroutineScope()
+    
+    var onboardingRequired by remember { mutableStateOf(app.settingsManager.displayName == null) }
+
+    if (onboardingRequired) {
+        WelcomePane(
+            onNameSet = { name ->
+                app.settingsManager.displayName = name
+                onboardingRequired = false
+                app.meshNetworkManager.start() // Restart to update display name in BLE
+            }
+        )
+        return
+    }
 
     val homeViewModel: HomeViewModel = viewModel(
         factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return HomeViewModel(app.database.peerDao()) as T
+                return HomeViewModel(
+                    app.database.peerDao(), 
+                    app.settingsManager,
+                    app.meshNetworkManager.connectedPeerAddresses
+                ) as T
             }
         }
     )
@@ -49,6 +67,12 @@ fun MainScreen(
     BackHandler(navigator.canNavigateBack()) {
         coroutineScope.launch {
             navigator.navigateBack()
+        }
+    }
+
+    LaunchedEffect(navigator.currentDestination) {
+        if (navigator.currentDestination == null || navigator.currentDestination?.contentKey is NavRoute.Chat) {
+            homeViewModel.refreshSettings()
         }
     }
 

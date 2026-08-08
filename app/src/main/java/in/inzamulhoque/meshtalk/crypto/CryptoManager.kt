@@ -1,6 +1,9 @@
 package `in`.inzamulhoque.meshtalk.crypto
 
 import android.content.Context
+import android.util.Log
+import java.security.KeyStore
+import com.google.crypto.tink.KeyTemplate
 import com.google.crypto.tink.KeyTemplates
 import com.google.crypto.tink.KeysetHandle
 import com.google.crypto.tink.PublicKeySign
@@ -25,19 +28,56 @@ class CryptoManager(context: Context) {
         SignatureConfig.register()
         com.google.crypto.tink.hybrid.HybridConfig.register()
 
-        keysetHandle = AndroidKeysetManager.Builder()
-            .withSharedPref(context, keysetName, prefFileName)
-            .withKeyTemplate(KeyTemplates.get("ED25519"))
-            .withMasterKeyUri(masterKeyUri)
-            .build()
-            .keysetHandle
+        var tempKeysetHandle: KeysetHandle? = null
+        var tempEncryptionHandle: KeysetHandle? = null
 
-        encryptionKeysetHandle = AndroidKeysetManager.Builder()
-            .withSharedPref(context, encryptionKeysetName, prefFileName)
-            .withKeyTemplate(KeyTemplates.get("ECIES_P256_HKDF_HMAC_SHA256_AES128_GCM"))
+        try {
+            tempKeysetHandle = buildKeysetHandle(context, keysetName, KeyTemplates.get("ED25519"))
+            tempEncryptionHandle = buildKeysetHandle(context, encryptionKeysetName, KeyTemplates.get("ECIES_P256_HKDF_HMAC_SHA256_AES128_GCM"))
+        } catch (e: Exception) {
+            Log.e("CryptoManager", "Primary crypto initialization failed, attempting recovery...", e)
+            try {
+                resetCryptoState(context)
+                tempKeysetHandle = buildKeysetHandle(context, keysetName, KeyTemplates.get("ED25519"))
+                tempEncryptionHandle = buildKeysetHandle(context, encryptionKeysetName, KeyTemplates.get("ECIES_P256_HKDF_HMAC_SHA256_AES128_GCM"))
+                Log.i("CryptoManager", "Crypto recovery successful. New identity generated.")
+            } catch (recoveryException: Exception) {
+                Log.e("CryptoManager", "Crypto recovery failed!", recoveryException)
+                throw GeneralSecurityException("Tink initialization failed permanently", recoveryException)
+            }
+        }
+
+        keysetHandle = tempKeysetHandle!!
+        encryptionKeysetHandle = tempEncryptionHandle!!
+    }
+
+    private fun buildKeysetHandle(context: Context, name: String, template: KeyTemplate): KeysetHandle {
+        return AndroidKeysetManager.Builder()
+            .withSharedPref(context, name, prefFileName)
+            .withKeyTemplate(template)
             .withMasterKeyUri(masterKeyUri)
             .build()
             .keysetHandle
+    }
+
+    private fun resetCryptoState(context: Context) {
+        Log.w("CryptoManager", "Resetting crypto state: clearing prefs and deleting master key")
+        
+        // 1. Clear SharedPreferences
+        context.getSharedPreferences(prefFileName, Context.MODE_PRIVATE).edit().clear().apply()
+
+        // 2. Delete Master Key from Android Keystore
+        try {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore")
+            keyStore.load(null)
+            val keyAlias = masterKeyUri.removePrefix("android-keystore://")
+            if (keyStore.containsAlias(keyAlias)) {
+                keyStore.deleteEntry(keyAlias)
+                Log.i("CryptoManager", "Deleted corrupted master key: $keyAlias")
+            }
+        } catch (e: Exception) {
+            Log.e("CryptoManager", "Failed to delete master key from Keystore", e)
+        }
     }
 
     fun getPublicKey(): ByteArray {
