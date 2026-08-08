@@ -94,9 +94,9 @@ class MeshGattClient(
         } catch (_: SecurityException) {}
     }
 
-    fun sendData(json: String) {
+    fun sendData(data: ByteArray) {
         scope.launch {
-            writeQueue.add(json.toByteArray())
+            writeQueue.add(data)
             val g = gatt ?: return@launch
             processWriteQueueSuspend(g)
         }
@@ -244,10 +244,9 @@ class MeshGattClient(
             
             scope.launch {
                 val handshake = protocol.createHandshake(myEncryptionKey, myDisplayName)
-                val json = protocol.serializeHandshake(handshake)
+                val data = protocol.serializeHandshake(handshake)
                 Log.d("MeshGattClient", "Sending handshake to ${device.address}")
-                writeQueue.add(json.toByteArray())
-                processWriteQueueSuspend(gatt)
+                sendData(data)
             }
         }
 
@@ -276,10 +275,9 @@ class MeshGattClient(
                         }
                         
                         if (currentOffset == fullData.size) {
-                            val json = String(fullData)
                             Log.d("MeshGattClient", "Reassembled incoming data from ${device.address}")
                             
-                            val handshake = protocol.deserializeHandshake(json)
+                            val handshake = protocol.deserializeHandshake(fullData)
                             if (handshake != null) {
                                 scope.launch {
                                     val messagesToSync = protocol.handleHandshake(handshake, device.address)
@@ -290,7 +288,7 @@ class MeshGattClient(
                                 }
                             } else {
                                 scope.launch {
-                                    val message = protocol.deserializeMessage(json)
+                                    val message = protocol.deserializeMessage(fullData)
                                     if (message != null) {
                                         val (reply, forward) = protocol.processReceivedMessage(message)
                                         if (reply != null) {
@@ -301,7 +299,7 @@ class MeshGattClient(
                                         }
                                         return@launch
                                     }
-                                    val syncUpdate = protocol.deserializeSyncUpdate(json)
+                                    val syncUpdate = protocol.deserializeSyncUpdate(fullData)
                                     if (syncUpdate != null) {
                                         protocol.processSyncUpdate(syncUpdate)
                                     }

@@ -37,4 +37,20 @@ class SettingsManager(context: Context) {
     var isShowConnectingDevicesEnabled: Boolean
         get() = prefs.getBoolean("show_connecting_devices", true)
         set(value) = prefs.edit().putBoolean("show_connecting_devices", value).apply()
+
+    var pruneOthersMessagesDays: Int
+        get() = prefs.getInt("prune_others_days", 30)
+        set(value) = prefs.edit().putInt("prune_others_days", value).apply()
+
+    var isPruningOwnMessagesEnabled: Boolean
+        get() = prefs.getBoolean("prune_own_enabled", false)
+        set(value) = prefs.edit().putBoolean("prune_own_enabled", value).apply()
+
+    var pruneOwnMessagesDays: Int
+        get() = prefs.getInt("prune_own_days", 180)
+        set(value) = prefs.edit().putInt("prune_own_days", value).apply()
+
+    var isMovementSensingEnabled: Boolean
+        get() = prefs.getBoolean("movement_sensing_enabled", true)
+        set(value) = prefs.edit().putBoolean("movement_sensing_enabled", value).apply()
 }

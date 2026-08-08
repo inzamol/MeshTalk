@@ -9,6 +9,8 @@ import `in`.inzamulhoque.meshtalk.data.local.AppDatabase
 import `in`.inzamulhoque.meshtalk.data.local.entity.Message
 import `in`.inzamulhoque.meshtalk.data.local.entity.MessageStatus
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+import `in`.inzamulhoque.meshtalk.util.FileUtils
+import `in`.inzamulhoque.meshtalk.util.MovementDetector
 import `in`.inzamulhoque.meshtalk.util.SettingsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +20,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 class MeshNetworkManager(
@@ -64,6 +68,12 @@ class MeshNetworkManager(
 
     private val scope = CoroutineScope(Dispatchers.IO)
     private val activeClients = mutableMapOf<String, MeshGattClient>()
+    private val connectionCooldowns = mutableMapOf<String, Long>()
+    
+    private var lastMovementTime = System.currentTimeMillis()
+    private val movementDetector = MovementDetector(context) {
+        lastMovementTime = System.currentTimeMillis()
+    }
     
     private val _activeAddresses = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
     val activeAddresses = _activeAddresses.asStateFlow()
@@ -74,9 +84,10 @@ class MeshNetworkManager(
     ) { active, server ->
         active + server
     }.stateIn(scope, SharingStarted.Eagerly, emptySet())
-    private val connectionCooldowns = mutableMapOf<String, Long>()
+
     private var autoReconnectJob: kotlinx.coroutines.Job? = null
     private var timeoutCheckJob: kotlinx.coroutines.Job? = null
+    private var pruningJob: kotlinx.coroutines.Job? = null
 
     fun start() {
         Log.d("MeshNetworkManager", "Starting MeshNetworkManager. myIdHash: ${String(myShortId)}")
@@ -87,9 +98,13 @@ class MeshNetworkManager(
             if (settingsManager.isContinuousSearchEnabled) {
                 bleManager?.startScanning()
             }
+            if (settingsManager.isMovementSensingEnabled) {
+                movementDetector.start()
+            }
             gattServer.start()
             startAutoReconnectLoop()
             startTimeoutCheckLoop()
+            startPruningLoop()
         }
     }
 
@@ -110,6 +125,12 @@ class MeshNetworkManager(
         } else {
             bleManager?.stopScanning()
         }
+        
+        if (settingsManager.isMovementSensingEnabled) {
+            movementDetector.start()
+        } else {
+            movementDetector.stop()
+        }
     }
 
     private fun startTimeoutCheckLoop() {
@@ -123,11 +144,58 @@ class MeshNetworkManager(
         }
     }
 
+    private fun startPruningLoop() {
+        pruningJob?.cancel()
+        pruningJob = scope.launch {
+            while (true) {
+                try {
+                    val now = System.currentTimeMillis()
+                    val myId = identityManager.getMyId()
+                    
+                    // Prune others messages
+                    val othersThreshold = now - (settingsManager.pruneOthersMessagesDays.toLong() * 24 * 60 * 60 * 1000)
+                    database.messageDao().pruneOthersMessages(myId, othersThreshold)
+                    
+                    // Prune own messages if enabled
+                    if (settingsManager.isPruningOwnMessagesEnabled) {
+                        val ownThreshold = now - (settingsManager.pruneOwnMessagesDays.toLong() * 24 * 60 * 60 * 1000)
+                        database.messageDao().pruneOwnMessages(myId, ownThreshold)
+                    }
+                } catch (e: Exception) {
+                    Log.e("MeshNetworkManager", "Error in pruning loop", e)
+                }
+                delay(12.hours)
+            }
+        }
+    }
+
     private fun startAutoReconnectLoop() {
         autoReconnectJob?.cancel()
         autoReconnectJob = scope.launch {
             while (true) {
-                delay(15.seconds)
+                val nowTime = System.currentTimeMillis()
+                
+                // Adaptive delay based on movement
+                val isMoving = nowTime - lastMovementTime < 30000 // 30 seconds since last movement
+                val scanInterval = if (!settingsManager.isMovementSensingEnabled || isMoving) {
+                    15.seconds
+                } else {
+                    2.minutes
+                }
+                
+                delay(scanInterval)
+                
+                if (settingsManager.isContinuousSearchEnabled) {
+                    // If stationary, maybe stop scanning temporarily to save battery?
+                    if (settingsManager.isMovementSensingEnabled && !isMoving) {
+                        Log.d("MeshNetworkManager", "Stationary detected, pausing scan to save battery")
+                        bleManager?.stopScanning()
+                        delay(10.seconds) // Keep it stopped for a bit
+                    } else {
+                        bleManager?.startScanning()
+                    }
+                }
+
                 val peers = database.peerDao().getAllPeersSync()
                 val now = System.currentTimeMillis()
                 peers.forEach { peer ->
@@ -146,6 +214,8 @@ class MeshNetworkManager(
     fun stop() {
         autoReconnectJob?.cancel()
         timeoutCheckJob?.cancel()
+        pruningJob?.cancel()
+        movementDetector.stop()
         bleManager?.stopAdvertising()
         bleManager?.stopScanning()
         gattServer.stop()
@@ -212,13 +282,13 @@ class MeshNetworkManager(
     }
 
     fun broadcastMessage(message: Message) {
-        val json = protocol.serializeMessage(message)
+        val data = protocol.serializeMessage(message)
         scope.launch {
             var sent = false
             
             // Try sending to currently active clients
             activeClients.values.forEach { client ->
-                client.sendData(json)
+                client.sendData(data)
                 sent = true
             }
             
@@ -231,7 +301,7 @@ class MeshNetworkManager(
                 }
             }
 
-            gattServer.broadcastData(json)
+            gattServer.broadcastData(data)
             if (gattServer.getConnectedDevicesCount() > 0) sent = true
 
             if (sent) {
@@ -240,23 +310,23 @@ class MeshNetworkManager(
         }
     }
 
-    fun broadcastSyncUpdate(update: `in`.inzamulhoque.meshtalk.protocol.SyncUpdate) {
-        val json = protocol.serializeSyncUpdate(update)
+    fun broadcastSyncUpdate(update: `in`.inzamulhoque.meshtalk.protocol.proto.ProtoSyncUpdate) {
+        val data = protocol.serializeSyncUpdate(update)
         scope.launch {
-            activeClients.values.forEach { it.sendData(json) }
-            gattServer.broadcastData(json)
+            activeClients.values.forEach { it.sendData(data) }
+            gattServer.broadcastData(data)
         }
     }
 
     fun forwardToOthers(message: Message, excludeAddress: String?) {
-        val json = protocol.serializeMessage(message)
+        val data = protocol.serializeMessage(message)
         scope.launch {
             activeClients.forEach { (address, client) ->
                 if (address != excludeAddress) {
-                    client.sendData(json)
+                    client.sendData(data)
                 }
             }
-            gattServer.broadcastData(json, excludeAddress)
+            gattServer.broadcastData(data, excludeAddress)
         }
     }
 }

@@ -23,6 +23,8 @@ import android.graphics.BitmapFactory
 import java.io.ByteArrayOutputStream
 
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+import `in`.inzamulhoque.meshtalk.protocol.proto.ProtoSyncUpdate
+import `in`.inzamulhoque.meshtalk.protocol.proto.SyncUpdateType
 
 class ChatViewModel(
     application: Application,
@@ -52,11 +54,12 @@ class ChatViewModel(
                 unread.forEach { msg ->
                     messageDao.updateMessageStatus(msg.id, MessageStatus.READ.name)
                     meshNetworkManager.broadcastSyncUpdate(
-                        `in`.inzamulhoque.meshtalk.protocol.SyncUpdate(
-                            type = `in`.inzamulhoque.meshtalk.protocol.SyncUpdateType.READ,
-                            targetUuid = msg.uuid,
-                            senderId = myId
-                        )
+                        ProtoSyncUpdate.newBuilder()
+                            .setType(SyncUpdateType.READ)
+                            .setTargetUuid(msg.uuid)
+                            .setSenderId(myId)
+                            .setTimestamp(System.currentTimeMillis())
+                            .build()
                     )
                 }
             }
@@ -185,11 +188,12 @@ class ChatViewModel(
             messageDao.deleteMessage(message)
             if (message.senderId == myId) {
                 meshNetworkManager.broadcastSyncUpdate(
-                    `in`.inzamulhoque.meshtalk.protocol.SyncUpdate(
-                        type = `in`.inzamulhoque.meshtalk.protocol.SyncUpdateType.DELETE_MESSAGE,
-                        targetUuid = message.uuid,
-                        senderId = myId
-                    )
+                    ProtoSyncUpdate.newBuilder()
+                        .setType(SyncUpdateType.DELETE_MESSAGE)
+                        .setTargetUuid(message.uuid)
+                        .setSenderId(myId)
+                        .setTimestamp(System.currentTimeMillis())
+                        .build()
                 )
             }
         }

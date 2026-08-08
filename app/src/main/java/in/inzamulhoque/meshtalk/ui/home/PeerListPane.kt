@@ -200,9 +200,13 @@ fun PeerItem(peer: Peer, showConnectingDevices: Boolean, isActive: Boolean, onCl
         leadingContent = {
             Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                 if (peer.avatarUri != null) {
-                    val bytes = try { Base64.decode(peer.avatarUri, Base64.DEFAULT) } catch (e: Exception) { null }
+                    val model = if (peer.avatarUri.startsWith("/")) {
+                        peer.avatarUri
+                    } else {
+                        try { Base64.decode(peer.avatarUri, Base64.DEFAULT) } catch (e: Exception) { null }
+                    }
                     AsyncImage(
-                        model = bytes,
+                        model = model,
                         contentDescription = null,
                         modifier = Modifier.size(40.dp).clip(CircleShape),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop

@@ -79,10 +79,10 @@ class MeshGattServer(
         } catch (_: SecurityException) {}
     }
 
-    fun broadcastData(json: String, excludeAddress: String? = null) {
+    fun broadcastData(data: ByteArray, excludeAddress: String? = null) {
         connectedDevices.forEach { device ->
             if (device.address != excludeAddress) {
-                sendDataViaNotification(device, json)
+                sendDataViaNotification(device, data)
             }
         }
     }
@@ -90,11 +90,10 @@ class MeshGattServer(
     fun getConnectedDevicesCount(): Int = connectedDevices.size
 
     @SuppressLint("MissingPermission")
-    private fun sendDataViaNotification(device: BluetoothDevice, json: String) {
+    private fun sendDataViaNotification(device: BluetoothDevice, data: ByteArray) {
         val service = gattServer?.getService(MeshConstants.SERVICE_UUID)
         val char = service?.getCharacteristic(MeshConstants.MESSAGE_EXCHANGE_CHAR_UUID) ?: return
         
-        val data = json.toByteArray()
         val msgId = (System.currentTimeMillis() % 256).toByte()
         val maxDataSize = 180 
         val totalChunks = (data.size + maxDataSize - 1) / maxDataSize
@@ -139,10 +138,7 @@ class MeshGattServer(
                     MeshConstants.IDENTITY_CHAR_UUID -> gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, myId.toByteArray().let { if (offset < it.size) it.copyOfRange(offset, it.size) else byteArrayOf() })
                     MeshConstants.ENCRYPTION_KEY_CHAR_UUID -> gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, myEncryptionKey.toByteArray().let { if (offset < it.size) it.copyOfRange(offset, it.size) else byteArrayOf() })
                     MeshConstants.DISPLAY_NAME_CHAR_UUID -> gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, (displayNameProvider() ?: "Unknown").toByteArray().let { if (offset < it.size) it.copyOfRange(offset, it.size) else byteArrayOf() })
-                    MeshConstants.INVENTORY_CHAR_UUID -> scope.launch {
-                        val inv = protocol.getInventory().joinToString(",").toByteArray()
-                        gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, if (offset < inv.size) inv.copyOfRange(offset, inv.size) else byteArrayOf())
-                    }
+                    MeshConstants.INVENTORY_CHAR_UUID -> gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, byteArrayOf())
                     else -> gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_FAILURE, offset, null)
                 }
             } catch (e: SecurityException) {}
@@ -167,18 +163,18 @@ class MeshGattServer(
                         val fullData = ByteArray(buffer.chunks.values.sumOf { it.size })
                         var curr = 0
                         for (i in 0 until total) { buffer.chunks[i]?.let { it.copyInto(fullData, curr); curr += it.size } }
-                        val json = String(fullData)
-                        val handshake = protocol.deserializeHandshake(json)
+                        
+                        val handshake = protocol.deserializeHandshake(fullData)
                         if (handshake != null) {
                             scope.launch {
                                 protocol.handleHandshake(handshake, dev.address)
                                 sendDataViaNotification(dev, protocol.serializeHandshake(protocol.createHandshake(myEncryptionKey, displayNameProvider())))
-                                protocol.getMessagesToSync(handshake.inventory).forEach { sendDataViaNotification(dev, protocol.serializeMessage(it)) }
+                                protocol.getMessagesToSync(handshake.bloomFilter).forEach { sendDataViaNotification(dev, protocol.serializeMessage(it)) }
                             }
-                        } else processReceivedJson(json, dev)
+                        } else processReceivedData(fullData, dev)
                         reassemblyBuffers.remove(bufferKey)
                     }
-                } else processReceivedJson(String(data), dev)
+                } else processReceivedData(data, dev)
                 if (responseNeeded) gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, data)
             } else if (responseNeeded) gattServer?.sendResponse(dev, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
         }
@@ -191,9 +187,9 @@ class MeshGattServer(
 
         private fun totalChunksFromData(data: ByteArray): Int = data[3].toInt() and 0xFF
 
-        private fun processReceivedJson(json: String, fromDevice: BluetoothDevice) {
+        private fun processReceivedData(data: ByteArray, fromDevice: BluetoothDevice) {
             scope.launch {
-                protocol.deserializeMessage(json)?.let { 
+                protocol.deserializeMessage(data)?.let { 
                     val (reply, forward) = protocol.processReceivedMessage(it)
                     if (reply != null) {
                         sendDataViaNotification(fromDevice, protocol.serializeSyncUpdate(reply))
@@ -203,7 +199,7 @@ class MeshGattServer(
                     }
                     return@launch 
                 }
-                protocol.deserializeSyncUpdate(json)?.let { protocol.processSyncUpdate(it); return@launch }
+                protocol.deserializeSyncUpdate(data)?.let { protocol.processSyncUpdate(it); return@launch }
             }
         }
     }
