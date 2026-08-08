@@ -80,10 +80,10 @@ class MeshProtocol(
     }
 
     fun serializeHandshake(handshake: Handshake): String = handshakeAdapter.toJson(handshake)
-    fun deserializeHandshake(json: String): Handshake? = try { handshakeAdapter.fromJson(json) } catch (e: Exception) { null }
+    fun deserializeHandshake(json: String): Handshake? = try { handshakeAdapter.fromJson(json) } catch (_: Exception) { null }
 
     fun serializeSyncUpdate(update: SyncUpdate): String = syncUpdateAdapter.toJson(update)
-    fun deserializeSyncUpdate(json: String): SyncUpdate? = try { syncUpdateAdapter.fromJson(json) } catch (e: Exception) { null }
+    fun deserializeSyncUpdate(json: String): SyncUpdate? = try { syncUpdateAdapter.fromJson(json) } catch (_: Exception) { null }
 
     suspend fun onPeerDiscovered(
         peerId: String, 
@@ -169,7 +169,7 @@ class MeshProtocol(
                     // Implementing full group encryption is complex (DH for each pair or a shared group key).
                     // As per plan, let's stick to basic group sync first.
                     identityManager.decryptMessage(message.content)
-                } catch (e: Exception) { "[Encrypted Message]" }
+                } catch (_: Exception) { "[Encrypted Message]" }
             } else message.content
 
             messageDao.insertMessage(message.copy(id = 0, status = MessageStatus.DELIVERED))
@@ -235,7 +235,7 @@ class MeshProtocol(
         return messageAdapter.toJson(cleanMessage)
     }
 
-    fun deserializeMessage(json: String): Message? = try { messageAdapter.fromJson(json) } catch (e: Exception) { null }
+    fun deserializeMessage(json: String): Message? = try { messageAdapter.fromJson(json) } catch (_: Exception) { null }
 
     companion object {
         private const val MAX_HOPS = 10
