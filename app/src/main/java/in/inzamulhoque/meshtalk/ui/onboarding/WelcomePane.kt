@@ -49,10 +49,20 @@ fun WelcomePane(
             Spacer(modifier = Modifier.height(8.dp))
             
             Text(
-                "Decentralized, local, and private messaging. To get started, tell us your name.",
+                "Decentralized, local, and private messaging.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.outline,
                 textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                "To get started, enter your name. This is how others will see you in the mesh.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.Medium
             )
             
             Spacer(modifier = Modifier.height(48.dp))

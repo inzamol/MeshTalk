@@ -23,6 +23,7 @@ import `in`.inzamulhoque.meshtalk.ui.navigation.NavRoute
 import `in`.inzamulhoque.meshtalk.ui.settings.SettingsPane
 import `in`.inzamulhoque.meshtalk.ui.settings.SettingsViewModel
 import `in`.inzamulhoque.meshtalk.ui.onboarding.WelcomePane
+import `in`.inzamulhoque.meshtalk.ui.settings.QRScannerScreen
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -39,7 +40,8 @@ fun MainScreen(
     val navigator = rememberListDetailPaneScaffoldNavigator<NavRoute>(scaffoldDirective)
     val coroutineScope = rememberCoroutineScope()
     
-    var onboardingRequired by remember { mutableStateOf(app.settingsManager.displayName == null) }
+    var onboardingRequired by remember { mutableStateOf(app.settingsManager.displayName == null || app.settingsManager.displayName!!.isBlank()) }
+    var showGlobalScanner by remember { mutableStateOf(false) }
 
     if (onboardingRequired) {
         WelcomePane(
@@ -107,6 +109,9 @@ fun MainScreen(
                     },
                     onRefresh = {
                         app.meshNetworkManager.refreshSearch()
+                    },
+                    onAddPeerClick = {
+                        showGlobalScanner = true
                     }
                 )
             }
@@ -162,6 +167,11 @@ fun MainScreen(
                                 coroutineScope.launch {
                                     navigator.navigateBack()
                                 }
+                            },
+                            onNavigateToChat = { peerId ->
+                                coroutineScope.launch {
+                                    navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, NavRoute.Chat(peerId))
+                                }
                             }
                         )
                     }
@@ -196,4 +206,18 @@ fun MainScreen(
             }
         }
     )
+
+    if (showGlobalScanner) {
+        @androidx.camera.core.ExperimentalGetImage
+        QRScannerScreen(
+            onResult = { result ->
+                val peerId = homeViewModel.verifyPeer(result)
+                showGlobalScanner = false
+                coroutineScope.launch {
+                    navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, NavRoute.Chat(peerId))
+                }
+            },
+            onDismiss = { showGlobalScanner = false }
+        )
+    }
 }
