@@ -17,3 +17,4 @@ local.properties
 .agent
 .idea
 *.jks
+signing.properties
