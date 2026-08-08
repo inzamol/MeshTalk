@@ -76,7 +76,7 @@ class MeshGattClient(
     private fun resetIdleTimeout() {
         idleDisconnectJob?.cancel()
         idleDisconnectJob = scope.launch {
-            delay(15000) // Disconnect after 15s of inactivity
+            delay(120000) // Disconnect after 2 minutes of inactivity
             Log.d("MeshGattClient", "Idle timeout reached for ${device.address}")
             withContext(Dispatchers.Main) {
                 disconnect()
@@ -185,7 +185,8 @@ class MeshGattClient(
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             try {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    Log.d("MeshGattClient", "Connected to ${device.address}. Requesting MTU 512...")
+                    Log.d("MeshGattClient", "Connected to ${device.address}. Requesting MTU 512 and High Priority...")
+                    gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
                     gatt?.requestMtu(512)
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.d("MeshGattClient", "Disconnected from ${device.address}")

@@ -1,21 +1,16 @@
 package `in`.inzamulhoque.meshtalk.ui.home
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.GroupAdd
-import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.SignalCellularAlt
-import androidx.compose.material.icons.rounded.SignalCellularAlt1Bar
-import androidx.compose.material.icons.rounded.SignalCellularAlt2Bar
-import androidx.compose.material.icons.rounded.Verified
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
@@ -29,6 +24,7 @@ import coil.compose.AsyncImage
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.flow.StateFlow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,7 +37,13 @@ fun PeerListPane(
     modifier: Modifier = Modifier
 ) {
     val peers by viewModel.peers.collectAsState()
+    val showConnectingDevices by viewModel.showConnectingDevices.collectAsState()
+    val activePeerAddresses by viewModel.activePeerAddresses.collectAsState()
     var peerToDelete by remember { mutableStateOf<Peer?>(null) }
+    
+    LaunchedEffect(Unit) {
+        viewModel.refreshSettings()
+    }
     var isRefreshing by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
@@ -105,7 +107,9 @@ fun PeerListPane(
                 ) {
                     items(peers, key = { it.deviceAddress ?: it.id }) { peer ->
                         PeerItem(
-                            peer = peer, 
+                            peer = peer,
+                            showConnectingDevices = showConnectingDevices,
+                            isActive = activePeerAddresses.contains(peer.deviceAddress),
                             onClick = { onPeerClick(peer.id) },
                             onLongClick = { peerToDelete = peer }
                         )
@@ -137,20 +141,21 @@ fun PeerListPane(
     }
 }
 
-
-
-
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PeerItem(peer: Peer, onClick: () -> Unit, onLongClick: () -> Unit) {
+fun PeerItem(peer: Peer, showConnectingDevices: Boolean, isActive: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val isHandshaked = !peer.encryptionKey.isNullOrBlank()
+    val displayName = if (!isHandshaked && !showConnectingDevices && (peer.displayName == "Connecting..." || peer.displayName == "Mesh Peer")) {
+        "Mesh Peer"
+    } else {
+        peer.displayName ?: "Unknown Peer"
+    }
     
     ListItem(
         headlineContent = { 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = peer.displayName ?: "Unknown Peer",
+                    text = displayName,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f)
                 )
@@ -181,17 +186,19 @@ fun PeerItem(peer: Peer, onClick: () -> Unit, onLongClick: () -> Unit) {
         supportingContent = { 
             val statusText = if (isHandshaked) {
                 peer.bio ?: (peer.id.take(16) + "...")
-            } else {
+            } else if (showConnectingDevices) {
                 "Connecting / Handshaking..."
+            } else {
+                peer.id.take(16) + "..."
             }
             Text(
                 statusText,
                 maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis
             ) 
         },
         leadingContent = {
-            Box(contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                 if (peer.avatarUri != null) {
                     val bytes = try { Base64.decode(peer.avatarUri, Base64.DEFAULT) } catch (e: Exception) { null }
                     AsyncImage(
@@ -204,6 +211,7 @@ fun PeerItem(peer: Peer, onClick: () -> Unit, onLongClick: () -> Unit) {
                     Icon(
                         Icons.Rounded.Person, 
                         contentDescription = null,
+                        modifier = Modifier.size(24.dp),
                         tint = if (isHandshaked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                     )
                 }
@@ -213,6 +221,16 @@ fun PeerItem(peer: Peer, onClick: () -> Unit, onLongClick: () -> Unit) {
                         modifier = Modifier.size(32.dp),
                         strokeWidth = 2.dp,
                         color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                if (isActive) {
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .align(Alignment.BottomEnd)
+                            .background(Color(0xFF4CAF50), CircleShape)
+                            .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
                     )
                 }
             }

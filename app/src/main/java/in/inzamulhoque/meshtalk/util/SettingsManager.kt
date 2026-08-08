@@ -33,4 +33,8 @@ class SettingsManager(context: Context) {
     var isContinuousSearchEnabled: Boolean
         get() = prefs.getBoolean("continuous_search_enabled", true)
         set(value) = prefs.edit().putBoolean("continuous_search_enabled", value).apply()
+
+    var isShowConnectingDevicesEnabled: Boolean
+        get() = prefs.getBoolean("show_connecting_devices", true)
+        set(value) = prefs.edit().putBoolean("show_connecting_devices", value).apply()
 }

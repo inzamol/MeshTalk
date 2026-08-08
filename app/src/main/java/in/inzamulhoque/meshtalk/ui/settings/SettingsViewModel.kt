@@ -32,6 +32,9 @@ class SettingsViewModel(
     private val _continuousSearchEnabled = MutableStateFlow(settingsManager.isContinuousSearchEnabled)
     val continuousSearchEnabled = _continuousSearchEnabled.asStateFlow()
 
+    private val _showConnectingDevicesEnabled = MutableStateFlow(settingsManager.isShowConnectingDevicesEnabled)
+    val showConnectingDevicesEnabled = _showConnectingDevicesEnabled.asStateFlow()
+
     private val _bio = MutableStateFlow(settingsManager.bio ?: "")
     val bio = _bio.asStateFlow()
 
@@ -72,6 +75,11 @@ class SettingsViewModel(
         settingsManager.isContinuousSearchEnabled = enabled
         _continuousSearchEnabled.value = enabled
         meshNetworkManager.updateScanningState()
+    }
+
+    fun setShowConnectingDevicesEnabled(enabled: Boolean) {
+        settingsManager.isShowConnectingDevicesEnabled = enabled
+        _showConnectingDevicesEnabled.value = enabled
     }
 
     fun deleteAllMessages() {
