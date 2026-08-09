@@ -3,15 +3,12 @@
   <component name="deploymentTargetSelector">
     <selectionStates>
       <SelectionState runConfigName="app">
-        <option name="selectionMode" value="DROPDOWN" />
-        <DropdownSelection timestamp="2026-08-04T05:29:10.152684100Z">
+        <option name="selectionMode" value="DIALOG" />
+        <DropdownSelection timestamp="2026-08-04T18:59:23.433175Z">
           <Target type="DEFAULT_BOOT">
             <handle>
-              <DeviceId pluginId="FirebaseDirectAccess" identifier="reservation=projects/subshare-d5e69/deviceSessions/session-2bnqulenrjb8z" />
+              <DeviceId pluginId="PhysicalDevice" identifier="serial=RZCX116Z0GB" />
             </handle>
-            <template>
-              <DeviceId pluginId="FirebaseDirectAccess" type="TEMPLATE" identifier="model_id=SC-51E/36" />
-            </template>
           </Target>
         </DropdownSelection>
         <DialogSelection>

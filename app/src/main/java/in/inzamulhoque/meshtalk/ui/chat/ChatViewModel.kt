@@ -14,6 +14,18 @@ import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+import android.net.Uri
+import android.util.Base64
+import `in`.inzamulhoque.meshtalk.data.local.entity.MessageType
+import java.io.InputStream
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import java.io.ByteArrayOutputStream
+
+import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
+import `in`.inzamulhoque.meshtalk.protocol.proto.ProtoSyncUpdate
+import `in`.inzamulhoque.meshtalk.protocol.proto.SyncUpdateType
+
 class ChatViewModel(
     application: Application,
     private val meshNetworkManager: MeshNetworkManager,
@@ -31,7 +43,36 @@ class ChatViewModel(
     val peer: StateFlow<Peer?> = peerDao.getPeerFlowById(peerId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    val messages: StateFlow<List<Message>> = messageDao.getMessagesForPeer(peerId)
+    val messages: StateFlow<List<Message>> = (if (peerId == MeshProtocol.PUBLIC_GROUP_ID) {
+        messageDao.getMessagesForGroup(peerId)
+    } else {
+        messageDao.getMessagesForPeer(peerId)
+    }).onEach { list ->
+            // Mark unread incoming messages as READ
+            val isPublic = peerId == MeshProtocol.PUBLIC_GROUP_ID
+            val unread = list.filter { 
+                val isIncoming = if (isPublic) it.senderId != myId else it.receiverId == myId
+                isIncoming && it.status != MessageStatus.READ 
+            }
+            
+            if (unread.isNotEmpty()) {
+                unread.forEach { msg ->
+                    messageDao.updateMessageStatus(msg.id, MessageStatus.READ.name)
+                    
+                    // Only broadcast READ receipts for private chats
+                    if (!isPublic) {
+                        meshNetworkManager.broadcastSyncUpdate(
+                            ProtoSyncUpdate.newBuilder()
+                                .setType(SyncUpdateType.READ)
+                                .setTargetUuid(msg.uuid)
+                                .setSenderId(myId)
+                                .setTimestamp(System.currentTimeMillis())
+                                .build()
+                        )
+                    }
+                }
+            }
+        }
         .map { list ->
             list.map { msg ->
                 if (msg.senderId == myId && msg.localPlaintext != null) {
@@ -41,7 +82,6 @@ class ChatViewModel(
                     try {
                         msg.copy(content = identityManager.decryptMessage(msg.content), isEncrypted = false)
                     } catch (e: Exception) {
-                        ToastHelper.showToast(getApplication(), "Failed to decrypt message from peer")
                         msg.copy(content = "[Decryption Failed]")
                     }
                 } else {
@@ -53,8 +93,9 @@ class ChatViewModel(
 
     fun sendMessage(content: String) {
         viewModelScope.launch {
-            val peerEntity = peerDao.getPeerById(peerId)
-            val encryptionKey = peerEntity?.encryptionKey ?: peerEntity?.publicKey // Fallback to publicKey if available
+            val isPublic = peerId == MeshProtocol.PUBLIC_GROUP_ID
+            val peerEntity = if (!isPublic) peerDao.getPeerById(peerId) else null
+            val encryptionKey = if (isPublic) null else (peerEntity?.encryptionKey ?: peerEntity?.publicKey)
             
             val finalContent = if (encryptionKey != null) {
                 try {
@@ -69,13 +110,120 @@ class ChatViewModel(
 
             val message = Message(
                 senderId = myId,
-                receiverId = peerId,
+                receiverId = if (isPublic) "" else peerId,
+                groupId = if (isPublic) MeshProtocol.PUBLIC_GROUP_ID else null,
                 content = finalContent,
                 localPlaintext = content, // Store the original text locally
                 isEncrypted = encryptionKey != null,
-                status = MessageStatus.SENT
+                status = MessageStatus.PENDING, // Start as PENDING
+                type = MessageType.TEXT
             )
-            messageDao.insertMessage(message)
+            val msgId = messageDao.insertMessage(message)
+            val savedMsg = message.copy(id = msgId)
+            
+            meshNetworkManager.broadcastMessage(savedMsg)
+        }
+    }
+
+    fun sendImage(uri: Uri) {
+        viewModelScope.launch {
+            val base64 = compressAndEncodeImage(uri) ?: return@launch
+            val peerEntity = peerDao.getPeerById(peerId)
+            val encryptionKey = peerEntity?.encryptionKey ?: peerEntity?.publicKey
+
+            val finalContent = if (encryptionKey != null) {
+                try {
+                    identityManager.encryptMessage(base64, encryptionKey)
+                } catch (e: Exception) {
+                    base64
+                }
+            } else {
+                base64
+            }
+
+            val message = Message(
+                senderId = myId,
+                receiverId = peerId,
+                content = finalContent,
+                localPlaintext = uri.toString(), // Store local URI for display
+                isEncrypted = encryptionKey != null,
+                status = MessageStatus.PENDING,
+                type = MessageType.IMAGE,
+                mediaUri = uri.toString()
+            )
+            val msgId = messageDao.insertMessage(message)
+            meshNetworkManager.broadcastMessage(message.copy(id = msgId))
+        }
+    }
+
+    private fun compressAndEncodeImage(uri: Uri): String? {
+        return try {
+            val inputStream: InputStream? = getApplication<Application>().contentResolver.openInputStream(uri)
+            val originalBitmap = BitmapFactory.decodeStream(inputStream)
+            
+            // Resize for mesh transport (max 400px width/height)
+            val ratio = Math.min(400.0 / originalBitmap.width, 400.0 / originalBitmap.height).coerceAtMost(1.0)
+            val resized = if (ratio < 1.0) {
+                Bitmap.createScaledBitmap(
+                    originalBitmap,
+                    (originalBitmap.width * ratio).toInt(),
+                    (originalBitmap.height * ratio).toInt(),
+                    true
+                )
+            } else originalBitmap
+
+            val outputStream = ByteArrayOutputStream()
+            resized.compress(Bitmap.CompressFormat.JPEG, 70, outputStream)
+            val bytes = outputStream.toByteArray()
+            Base64.encodeToString(bytes, Base64.DEFAULT)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun retryMessage(message: Message) {
+        viewModelScope.launch {
+            val updatedMessage = message.copy(
+                timestamp = System.currentTimeMillis(),
+                status = MessageStatus.PENDING
+            )
+            messageDao.insertMessage(updatedMessage)
+            meshNetworkManager.broadcastMessage(updatedMessage)
+        }
+    }
+
+    fun deleteMessage(message: Message) {
+        viewModelScope.launch {
+            messageDao.deleteMessage(message)
+            if (message.senderId == myId) {
+                meshNetworkManager.broadcastSyncUpdate(
+                    ProtoSyncUpdate.newBuilder()
+                        .setType(SyncUpdateType.DELETE_MESSAGE)
+                        .setTargetUuid(message.uuid)
+                        .setSenderId(myId)
+                        .setTimestamp(System.currentTimeMillis())
+                        .build()
+                )
+            }
+        }
+    }
+
+    fun deleteChat() {
+        viewModelScope.launch {
+            messageDao.deleteMessagesForPeer(peerId)
+            val p = peerDao.getPeerById(peerId)
+            if (p != null) {
+                peerDao.deletePeer(p)
+            }
+        }
+    }
+
+    fun verifyCurrentPeer() {
+        viewModelScope.launch {
+            val p = peerDao.getPeerById(peerId)
+            if (p != null) {
+                peerDao.updatePeer(p.copy(isVerified = true))
+            }
         }
     }
 }

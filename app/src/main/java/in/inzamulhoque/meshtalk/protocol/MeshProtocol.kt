@@ -1,131 +1,298 @@
 package `in`.inzamulhoque.meshtalk.protocol
 
+import `in`.inzamulhoque.meshtalk.crypto.IdentityManager
+import `in`.inzamulhoque.meshtalk.data.local.dao.GroupDao
 import `in`.inzamulhoque.meshtalk.data.local.dao.MessageDao
 import `in`.inzamulhoque.meshtalk.data.local.dao.PeerDao
 import `in`.inzamulhoque.meshtalk.data.local.entity.Message
-import `in`.inzamulhoque.meshtalk.data.local.entity.Peer
 import `in`.inzamulhoque.meshtalk.data.local.entity.MessageStatus
+import `in`.inzamulhoque.meshtalk.data.local.entity.Peer
+import `in`.inzamulhoque.meshtalk.protocol.proto.*
+import `in`.inzamulhoque.meshtalk.util.BloomFilter
+import `in`.inzamulhoque.meshtalk.util.FileUtils
 import `in`.inzamulhoque.meshtalk.util.NotificationHelper
+import `in`.inzamulhoque.meshtalk.util.SettingsManager
 import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import android.content.Context
 import android.util.Log
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 
 class MeshProtocol(
     private val context: Context,
     private val myId: String,
     private val messageDao: MessageDao,
-    private val peerDao: PeerDao
+    private val peerDao: PeerDao,
+    private val groupDao: GroupDao,
+    private val identityManager: IdentityManager,
+    private val settingsManager: SettingsManager
 ) {
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-    private val messageAdapter = moshi.adapter(Message::class.java)
-    private val handshakeAdapter = moshi.adapter(Handshake::class.java)
+    private val heardCounts = ConcurrentHashMap<String, Int>()
 
-    suspend fun createHandshake(encryptionKey: String, displayName: String): Handshake {
-        return Handshake(
-            peerId = myId,
-            encryptionKey = encryptionKey,
-            displayName = displayName,
-            inventory = getInventory()
-        )
+    suspend fun createHandshake(encryptionKey: String, displayName: String): ProtoHandshake {
+        val bloomFilter = BloomFilter(512, 5)
+        messageDao.getAllMessageUuids().forEach { bloomFilter.add(it) }
+
+        return ProtoHandshake.newBuilder()
+            .setPeerId(myId)
+            .setEncryptionKey(encryptionKey)
+            .setDisplayName(displayName)
+            .setBloomFilter(com.google.protobuf.ByteString.copyFrom(bloomFilter.toByteArray()))
+            .setBio(settingsManager.bio ?: "")
+            .setAvatarBase64(settingsManager.avatarBase64 ?: "")
+            .build()
     }
 
-    suspend fun handleHandshake(handshake: Handshake, deviceAddress: String?): List<Message> {
+    suspend fun handleHandshake(handshake: ProtoHandshake, deviceAddress: String?): List<Message> {
         onPeerDiscovered(
             peerId = handshake.peerId,
-            publicKey = handshake.peerId, // Initial ID is the public key
+            publicKey = handshake.peerId,
             encryptionKey = handshake.encryptionKey,
             displayName = handshake.displayName,
-            deviceAddress = deviceAddress
+            deviceAddress = deviceAddress,
+            bio = handshake.bio,
+            avatarBase64 = handshake.avatarBase64
         )
-        ToastHelper.showToast(context, "Securely connected to ${handshake.displayName}")
-        return getMessagesToSync(handshake.inventory)
+        if (settingsManager.isConnectionToastEnabled) {
+            ToastHelper.showToast(context, "Securely connected to ${handshake.displayName}")
+        }
+        val messages = getMessagesToSync(handshake.bloomFilter)
+        Log.d("MeshProtocol", "Handshake from ${handshake.displayName}, syncing ${messages.size} messages")
+        return messages
     }
 
-    fun serializeHandshake(handshake: Handshake): String = handshakeAdapter.toJson(handshake)
-    fun deserializeHandshake(json: String): Handshake? = try { handshakeAdapter.fromJson(json) } catch (e: Exception) { null }
+    fun serializeHandshake(handshake: ProtoHandshake): ByteArray {
+        return MeshPacket.newBuilder().setHandshake(handshake).build().toByteArray()
+    }
 
-    suspend fun onPeerDiscovered(peerId: String, publicKey: String, encryptionKey: String?, displayName: String?, deviceAddress: String?) {
-        // Handle identity changes for the same device address
-        if (deviceAddress != null && peerId.length > 20) { // Only do this check for "strong" IDs (Public Keys)
-            val allPeers = peerDao.getAllPeersSync()
-            val stalePeers = allPeers.filter { it.deviceAddress == deviceAddress && it.id != peerId }
-            if (stalePeers.isNotEmpty()) {
-                Log.w("MeshProtocol", "Identity change detected for $deviceAddress. Removing ${stalePeers.size} stale peer(s).")
-                stalePeers.forEach { peerDao.deletePeer(it) }
+    fun serializeSyncUpdate(update: ProtoSyncUpdate): ByteArray {
+        return MeshPacket.newBuilder().setSyncUpdate(update).build().toByteArray()
+    }
+
+    fun serializeMessage(message: Message): ByteArray {
+        val proto = ProtoMessage.newBuilder()
+            .setUuid(message.uuid)
+            .setSenderId(message.senderId)
+            .setReceiverId(message.receiverId)
+            .setGroupId(message.groupId ?: "")
+            .setContent(message.content)
+            .setTimestamp(message.timestamp)
+            .setExpiryTimestamp(message.expiryTimestamp)
+            .setHopCount(message.hopCount)
+            .setIsEncrypted(message.isEncrypted)
+            .build()
+        return MeshPacket.newBuilder().setMessage(proto).build().toByteArray()
+    }
+
+    fun parsePacket(data: ByteArray): Any? {
+        return try {
+            val packet = MeshPacket.parseFrom(data)
+            when (packet.payloadCase) {
+                MeshPacket.PayloadCase.HANDSHAKE -> packet.handshake
+                MeshPacket.PayloadCase.MESSAGE -> {
+                    val proto = packet.message
+                    Message(
+                        uuid = proto.uuid,
+                        senderId = proto.senderId,
+                        receiverId = proto.receiverId,
+                        groupId = if (proto.groupId.isEmpty()) null else proto.groupId,
+                        content = proto.content,
+                        timestamp = proto.timestamp,
+                        expiryTimestamp = proto.expiryTimestamp,
+                        hopCount = proto.hopCount,
+                        isEncrypted = proto.isEncrypted
+                    )
+                }
+                MeshPacket.PayloadCase.SYNC_UPDATE -> packet.syncUpdate
+                else -> null
+            }
+        } catch (e: Exception) {
+            Log.e("MeshProtocol", "Error parsing packet", e)
+            null
+        }
+    }
+
+    suspend fun onPeerDiscovered(
+        peerId: String, 
+        publicKey: String, 
+        encryptionKey: String?, 
+        displayName: String?, 
+        deviceAddress: String?,
+        bio: String? = null,
+        avatarBase64: String? = null,
+        rssi: Int = -100
+    ) {
+        val existingPeer = peerDao.getPeerById(peerId)
+        
+        val avatarPath = if (avatarBase64 != null && avatarBase64.isNotEmpty()) {
+            if (existingPeer?.avatarUri != null && existingPeer.avatarUri.startsWith("/")) {
+                FileUtils.deleteFile(existingPeer.avatarUri)
+            }
+            FileUtils.saveBase64Avatar(context, avatarBase64)
+        } else existingPeer?.avatarUri
+
+        val allPeers = peerDao.getAllPeersSync()
+        
+        if (deviceAddress != null) {
+            val sameAddressPeers = allPeers.filter { 
+                it.deviceAddress?.equals(deviceAddress, ignoreCase = true) == true 
+            }
+            
+            if (publicKey.isNotEmpty()) {
+                val stale = sameAddressPeers.filter { it.id != peerId }
+                if (stale.isNotEmpty()) {
+                    stale.forEach { peerDao.deletePeer(it) }
+                }
+            } else {
+                if (sameAddressPeers.any { it.publicKey.isNotEmpty() }) {
+                    return
+                }
+                if (sameAddressPeers.any { it.id == peerId }) {
+                    return
+                }
             }
         }
 
-        val existingPeer = peerDao.getPeerById(peerId)
         if (existingPeer == null) {
-            Log.d("MeshProtocol", "New peer discovered: $peerId ($displayName)")
-            peerDao.insertPeer(Peer(peerId, publicKey, encryptionKey, displayName, deviceAddress, System.currentTimeMillis()))
+            val name = if (displayName.isNullOrBlank() || displayName.length > 50) "Mesh Peer" else displayName
+            peerDao.insertPeer(Peer(
+                id = peerId, 
+                publicKey = publicKey, 
+                encryptionKey = encryptionKey, 
+                displayName = name, 
+                deviceAddress = deviceAddress, 
+                lastSeen = System.currentTimeMillis(),
+                bio = bio,
+                avatarUri = avatarPath,
+                rssi = rssi
+            ))
         } else {
-            Log.d("MeshProtocol", "Existing peer seen: $peerId")
+            val name = if (!displayName.isNullOrBlank() && displayName.length <= 50) displayName else existingPeer.displayName
             peerDao.updatePeer(existingPeer.copy(
                 lastSeen = System.currentTimeMillis(), 
-                deviceAddress = deviceAddress,
+                deviceAddress = deviceAddress ?: existingPeer.deviceAddress,
                 encryptionKey = encryptionKey ?: existingPeer.encryptionKey,
-                displayName = displayName ?: existingPeer.displayName
+                displayName = name,
+                publicKey = if (publicKey.isNotEmpty()) publicKey else existingPeer.publicKey,
+                bio = bio ?: existingPeer.bio,
+                avatarUri = avatarPath,
+                rssi = rssi
             ))
         }
     }
 
-    suspend fun getInventory(): List<String> {
-        return messageDao.getAllMessageUuids().takeLast(20)
-    }
-
-    suspend fun getMessagesToSync(remoteInventory: List<String>): List<Message> {
+    suspend fun getMessagesToSync(remoteBloomBytes: com.google.protobuf.ByteString): List<Message> {
+        val filter = BloomFilter.fromByteArray(remoteBloomBytes.toByteArray(), 512, 5)
         val messagesToForward = messageDao.getMessagesToForward(myId, System.currentTimeMillis())
-        return messagesToForward.filter { !remoteInventory.contains(it.uuid) }
+        return messagesToForward.filter { !filter.contains(it.uuid) }
     }
 
-    suspend fun processReceivedMessage(message: Message) {
-        if (messageDao.getMessageByUuid(message.uuid) != null) {
-            Log.d("MeshProtocol", "Message ${message.uuid} already exists, skipping")
-            return
+    suspend fun processReceivedMessage(message: Message): Pair<ProtoSyncUpdate?, Message?> {
+        val existing = messageDao.getMessageByUuid(message.uuid)
+        if (existing != null) {
+            heardCounts[message.uuid] = (heardCounts[message.uuid] ?: 0) + 1
+            return null to null
         }
 
-        if (message.receiverId == myId) {
-            Log.d("MeshProtocol", "Received message for me from ${message.senderId}")
-            messageDao.insertMessage(message.copy(id = 0, status = MessageStatus.DELIVERED))
-            
-            // Notification
-            val peer = peerDao.getPeerById(message.senderId)
-            NotificationHelper.showMessageNotification(
-                context = context,
-                senderName = peer?.displayName ?: "Unknown Peer",
-                message = if (message.isEncrypted) "[Encrypted Message]" else message.content
-            )
-        } else if (message.hopCount < MAX_HOPS && message.expiryTimestamp > System.currentTimeMillis()) {
-            Log.d("MeshProtocol", "Received message to forward for ${message.receiverId}")
-            messageDao.insertMessage(message.copy(
-                id = 0, 
-                hopCount = message.hopCount + 1,
-                status = MessageStatus.CARRYING
-            ))
-        } else {
-            Log.d("MeshProtocol", "Received message discarded (max hops or expired)")
+        val isForMe = message.receiverId == myId || (message.groupId != null && (message.groupId == PUBLIC_GROUP_ID || isMemberOf(message.groupId)))
+
+        if (isForMe) {
+            // Only process/store public shout if enabled in settings
+            if (message.groupId == PUBLIC_GROUP_ID && !settingsManager.isPublicShoutEnabled) {
+                // Do not store, but allow forwarding below
+            } else {
+                val decryptedContent = if (message.isEncrypted && message.groupId != PUBLIC_GROUP_ID) {
+                    try {
+                        identityManager.decryptMessage(message.content)
+                    } catch (_: Exception) { "[Encrypted Message]" }
+                } else message.content
+
+                messageDao.insertMessage(message.copy(id = 0, status = MessageStatus.DELIVERED))
+                
+                val app = context.applicationContext as? `in`.inzamulhoque.meshtalk.MeshApplication
+                val isForeground = app?.isAppInForeground == true
+
+                if (settingsManager.isNotificationEnabled && !isForeground) {
+                    val peer = peerDao.getPeerById(message.senderId)
+                    NotificationHelper.showMessageNotification(
+                        context = context,
+                        senderId = message.senderId,
+                        senderName = peer?.displayName ?: "Unknown Peer",
+                        message = decryptedContent
+                    )
+                }
+                
+                if (message.groupId != PUBLIC_GROUP_ID) {
+                    val update = ProtoSyncUpdate.newBuilder()
+                        .setType(SyncUpdateType.DELIVERED)
+                        .setTargetUuid(message.uuid)
+                        .setSenderId(myId)
+                        .setTimestamp(System.currentTimeMillis())
+                        .build()
+                    return update to null
+                }
+                return null to null
+            }
+        } 
+        
+        if (message.hopCount < MAX_HOPS && message.expiryTimestamp > System.currentTimeMillis()) {
+            if (settingsManager.isForwardingEnabled) {
+                val delayMs = (20..150).random().toLong()
+                delay(delayMs.milliseconds)
+                
+                val heardCount = heardCounts.getOrDefault(message.uuid, 0)
+                if (heardCount >= 3) {
+                    messageDao.insertMessage(message.copy(id = 0, hopCount = message.hopCount + 1, status = MessageStatus.CARRYING))
+                    return null to null
+                }
+
+                val carrierMessage = message.copy(
+                    id = 0, 
+                    hopCount = message.hopCount + 1,
+                    status = MessageStatus.CARRYING
+                )
+                messageDao.insertMessage(carrierMessage)
+                
+                if (heardCounts.size > 100) heardCounts.clear() 
+                
+                return null to carrierMessage
+            }
         }
+        return null to null
     }
 
-    fun serializeMessage(message: Message): String {
-        // Exclude localPlaintext when sending over the mesh to save space and privacy
-        val cleanMessage = message.copy(localPlaintext = null)
-        return messageAdapter.toJson(cleanMessage)
+    private suspend fun isMemberOf(groupId: String): Boolean {
+        return groupDao.getGroupById(groupId) != null
     }
 
-    fun deserializeMessage(json: String): Message? {
-        return try {
-            messageAdapter.fromJson(json)
-        } catch (e: Exception) {
-            Log.e("MeshProtocol", "Deserialization error", e)
-            null
+    suspend fun processSyncUpdate(update: ProtoSyncUpdate) {
+        val msg = messageDao.getMessageByUuid(update.targetUuid) ?: return
+        Log.d("MeshProtocol", "Processing SyncUpdate ${update.type} for ${update.targetUuid.take(8)}")
+        
+        when (update.type) {
+            SyncUpdateType.DELETE_MESSAGE -> {
+                if (msg.senderId == update.senderId) {
+                    messageDao.deleteMessage(msg)
+                }
+            }
+            SyncUpdateType.DELIVERED -> {
+                if (msg.senderId == myId && msg.receiverId == update.senderId) {
+                    Log.d("MeshProtocol", "Message ${msg.uuid.take(8)} marked as DELIVERED")
+                    messageDao.updateMessageStatus(msg.id, MessageStatus.DELIVERED.name)
+                }
+            }
+            SyncUpdateType.READ -> {
+                if (msg.senderId == myId && msg.receiverId == update.senderId) {
+                    messageDao.updateMessageStatus(msg.id, MessageStatus.READ.name)
+                }
+            }
+            else -> {}
         }
     }
 
     companion object {
         private const val MAX_HOPS = 10
+        const val PUBLIC_GROUP_ID = "shout_channel"
     }
 }

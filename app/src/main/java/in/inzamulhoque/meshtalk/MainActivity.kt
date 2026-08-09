@@ -1,11 +1,13 @@
 package `in`.inzamulhoque.meshtalk
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -13,19 +15,28 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager
+import `in`.inzamulhoque.meshtalk.service.MeshForegroundService
 import `in`.inzamulhoque.meshtalk.ui.MainScreen
 import `in`.inzamulhoque.meshtalk.ui.theme.MeshTalkTheme
 import `in`.inzamulhoque.meshtalk.util.PermissionUtils
-import android.net.Uri
+import `in`.inzamulhoque.meshtalk.util.NotificationHelper
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
@@ -35,16 +46,30 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         val app = application as MeshApplication
-        val myId = app.identityManager.getMyId()
-
+        
         enableEdgeToEdge()
         setContent {
             MeshTalkTheme {
+                val initError = app.initializationError
+                if (initError != null) {
+                    FatalErrorScreen(error = initError)
+                    return@MeshTalkTheme
+                }
+
+                val myId = app.identityManager.getMyId()
                 val permissions = PermissionUtils.getRequiredPermissions()
                 val permissionState = rememberMultiplePermissionsState(permissions)
 
                 var isBluetoothEnabled by remember { mutableStateOf(true) }
                 var isLocationEnabled by remember { mutableStateOf(true) }
+                var initialPeerId by remember { mutableStateOf<String?>(null) }
+
+                LaunchedEffect(intent) {
+                    val peerId = intent.getStringExtra(NotificationHelper.EXTRA_PEER_ID)
+                    if (peerId != null) {
+                        initialPeerId = peerId
+                    }
+                }
 
                 LaunchedEffect(Unit) {
                     val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -59,10 +84,8 @@ class MainActivity : ComponentActivity() {
                 }
 
                 LaunchedEffect(permissionState.allPermissionsGranted, isBluetoothEnabled, isLocationEnabled) {
-                    Log.d("MainActivity", "Permissions: ${permissionState.allPermissionsGranted}, BT: $isBluetoothEnabled, Loc: $isLocationEnabled")
                     if (permissionState.allPermissionsGranted && isBluetoothEnabled && isLocationEnabled) {
-                        Log.d("MainActivity", "Starting MeshNetworkManager")
-                        (application as MeshApplication).meshNetworkManager.start()
+                        MeshForegroundService.start(this@MainActivity)
                     }
                 }
 
@@ -79,7 +102,9 @@ class MainActivity : ComponentActivity() {
                                 Button(onClick = {
                                     try {
                                         if (!isBluetoothEnabled) {
-                                            startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+                                            @SuppressLint("MissingPermission")
+                                            val intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                                            startActivity(intent)
                                         } else {
                                             startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
                                         }
@@ -92,7 +117,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     } else {
-                        MainScreen(myId = myId, app = app)
+                        MainScreen(myId = myId, app = app, initialPeerId = initialPeerId)
                     }
                 } else {
                     Scaffold(
@@ -139,6 +164,55 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        (application as? MeshApplication)?.meshNetworkManager?.stop()
+    }
+}
+
+@Composable
+fun FatalErrorScreen(error: Throwable) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.errorContainer
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = androidx.compose.material.icons.Icons.Default.Error,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(64.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Fatal Initialization Error",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "The application failed to start correctly. This usually happens due to issues with the Android Keystore or Database.",
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Surface(
+                color = Color.Black.copy(alpha = 0.1f),
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = Log.getStackTraceString(error),
+                    modifier = Modifier.padding(16.dp),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                )
+            }
+        }
     }
 }

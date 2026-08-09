@@ -2,14 +2,19 @@ package `in`.inzamulhoque.meshtalk.crypto
 
 import android.bluetooth.BluetoothAdapter
 import android.util.Base64
+import `in`.inzamulhoque.meshtalk.util.SettingsManager
 
-class IdentityManager(private val cryptoManager: CryptoManager) {
+class IdentityManager(
+    private val cryptoManager: CryptoManager,
+    private val settingsManager: SettingsManager
+) {
     
     fun getMyId(): String {
         return Base64.encodeToString(cryptoManager.getPublicKey(), Base64.NO_WRAP)
     }
 
     fun getDisplayName(): String {
+        settingsManager.displayName?.let { return it }
         return try {
             val name = BluetoothAdapter.getDefaultAdapter()?.name
             if (name.isNullOrBlank()) "Mesh Device" else name
@@ -42,5 +47,16 @@ class IdentityManager(private val cryptoManager: CryptoManager) {
         val encrypted = Base64.decode(encryptedMessageB64, Base64.NO_WRAP)
         val decrypted = cryptoManager.decrypt(encrypted)
         return String(decrypted)
+    }
+
+    /**
+     * Generates a rotating 4-byte Stealth ID for BLE advertising.
+     * Prevents physical tracking by changing every 15 minutes.
+     */
+    fun getStealthId(): ByteArray {
+        val window = System.currentTimeMillis() / (15 * 60 * 1000)
+        val input = getMyId() + window.toString()
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
+        return digest.copyOfRange(0, 4)
     }
 }
