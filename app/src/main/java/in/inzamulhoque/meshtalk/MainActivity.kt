@@ -1,7 +1,6 @@
 package `in`.inzamulhoque.meshtalk
 
 import android.annotation.SuppressLint
-import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
@@ -9,6 +8,7 @@ import android.content.Intent
 import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
+import android.content.IntentFilter
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -60,59 +60,80 @@ class MainActivity : ComponentActivity() {
                 val permissions = PermissionUtils.getRequiredPermissions()
                 val permissionState = rememberMultiplePermissionsState(permissions)
 
-                var isBluetoothEnabled by remember { mutableStateOf(true) }
-                var isLocationEnabled by remember { mutableStateOf(true) }
                 var initialPeerId by remember { mutableStateOf<String?>(null) }
 
-                LaunchedEffect(intent) {
-                    val peerId = intent.getStringExtra(NotificationHelper.EXTRA_PEER_ID)
-                    if (peerId != null) {
-                        initialPeerId = peerId
-                    }
+                val bluetoothManager = remember { getSystemService(BLUETOOTH_SERVICE) as BluetoothManager }
+                val locationManager = remember { getSystemService(LOCATION_SERVICE) as LocationManager }
+
+                var isBluetoothEnabled by remember {
+                    mutableStateOf(bluetoothManager.adapter?.isEnabled == true)
+                }
+                var isLocationEnabled by remember {
+                    mutableStateOf(
+                        locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+                    )
                 }
 
-                LaunchedEffect(Unit) {
-                    val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-                    val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-                    
-                    while(true) {
-                        isBluetoothEnabled = bluetoothManager.adapter?.isEnabled == true
-                        isLocationEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                DisposableEffect(Unit) {
+                    val receiver = object : android.content.BroadcastReceiver() {
+                        override fun onReceive(context: Context?, intent: Intent?) {
+                            when (intent?.action) {
+                                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                                    val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                                    isBluetoothEnabled = state == BluetoothAdapter.STATE_ON
+                                }
+                                LocationManager.MODE_CHANGED_ACTION -> {
+                                    isLocationEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
                                             locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-                        delay(2000)
+                                }
+                            }
+                        }
+                    }
+
+                    val filter = IntentFilter().apply {
+                        addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                        addAction(LocationManager.MODE_CHANGED_ACTION)
+                    }
+                    registerReceiver(receiver, filter)
+
+                    onDispose {
+                        unregisterReceiver(receiver)
                     }
                 }
 
-                LaunchedEffect(permissionState.allPermissionsGranted, isBluetoothEnabled, isLocationEnabled) {
-                    if (permissionState.allPermissionsGranted && isBluetoothEnabled && isLocationEnabled) {
+                LaunchedEffect(intent) {
+                    intent.getStringExtra(NotificationHelper.EXTRA_PEER_ID)?.let {
+                        initialPeerId = it
+                    }
+                }
+
+                LaunchedEffect(permissionState.allPermissionsGranted, isBluetoothEnabled) {
+                    if (permissionState.allPermissionsGranted && isBluetoothEnabled) {
                         MeshForegroundService.start(this@MainActivity)
                     }
                 }
 
                 if (permissionState.allPermissionsGranted) {
-                    if (!isBluetoothEnabled || !isLocationEnabled) {
+                    if (!isBluetoothEnabled) {
                         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                             Column(
                                 modifier = Modifier.fillMaxSize().padding(innerPadding),
                                 verticalArrangement = Arrangement.Center,
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("Bluetooth and Location services must be enabled.")
+                                Text("Bluetooth must be enabled.")
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Button(onClick = {
                                     try {
-                                        if (!isBluetoothEnabled) {
-                                            @SuppressLint("MissingPermission")
-                                            val intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-                                            startActivity(intent)
-                                        } else {
-                                            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                                        }
+                                        @SuppressLint("MissingPermission")
+                                        val intent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                                        startActivity(intent)
                                     } catch (e: Exception) {
                                         Log.e("MainActivity", "Failed to start settings intent", e)
-                                    }
+                                    } catch (_: SecurityException) {}
                                 }) {
-                                    Text("Enable Services")
+                                    Text("Enable Bluetooth")
                                 }
                             }
                         }
@@ -122,7 +143,7 @@ class MainActivity : ComponentActivity() {
                 } else {
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
-                        contentWindowInsets = WindowInsets(0)
+                        contentWindowInsets = WindowInsets(0),
                     ) { innerPadding ->
                         Column(
                             modifier = Modifier
@@ -146,12 +167,14 @@ class MainActivity : ComponentActivity() {
                             
                             if (!permissionState.shouldShowRationale && !permissionState.allPermissionsGranted) {
                                 Spacer(modifier = Modifier.height(8.dp))
-                                TextButton(onClick = {
-                                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                        data = Uri.fromParts("package", packageName, null)
+                                TextButton(
+                                    onClick = {
+                                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                            data = Uri.fromParts("package", packageName, null)
+                                        }
+                                        startActivity(intent)
                                     }
-                                    startActivity(intent)
-                                }) {
+                                ) {
                                     Text("Open Settings")
                                 }
                             }
@@ -160,6 +183,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        (application as? MeshApplication)?.meshNetworkManager?.onActivityDetected()
     }
 
     override fun onDestroy() {

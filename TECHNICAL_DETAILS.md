@@ -13,8 +13,9 @@ graph TD
     E --> F[MeshProtocol - Gossip v2]
     F --> G[IdentityManager - Tink/Ed25519]
     F --> H[BloomFilter Sync]
+    C --> K[WorkManager - Pruning/Rotation]
     B --> I[Room DB + FTS5]
-    D --> J[Movement Sensing - Accelerometer]
+    C --> J[Significant Motion Sensor]
 ```
 
 ---
@@ -25,11 +26,11 @@ Mesh Talk operates on a hybrid GATT (Generic Attribute Profile) model where ever
 
 ### A. Discovery Layer (Scanning & Advertising)
 - **Advertising**: The device broadcasts a 128-bit Service UUID (`MeshConstants.SERVICE_UUID`).
-- **Service Data**: To minimize handshake overhead, the BLE advertisement contains a 4-byte **Stealth ID** in the Service Data field.
-- **Scanning**: Devices perform low-latency scans to find the Service UUID.
+- **Hardware Filtering**: Implements `ScanFilter` at the OS level to ensure the hardware BLE chip only wakes the app for Mesh Talk packets.
+- **Scanning**: Performs batched scans (`setReportDelay`) to reduce CPU wake-up frequency.
 - **Adaptive Duty Cycle**: 
-    - **Active Mode**: When the `MovementDetector` (Accelerometer) detects motion, scanning occurs every 15 seconds.
-    - **Idle Mode**: When stationary for >30s, the interval backs off to 2 minutes, reducing radio power consumption by ~80%.
+    - **Active Mode**: When the **Significant Motion Sensor** detects motion, scanning occurs every 30 seconds with balanced power.
+    - **Idle Mode**: When stationary, the interval backs off to 5 minutes with `LOW_POWER` advertising, keeping the CPU in deep sleep.
 
 ### B. Transport Layer (Fragmentation & Reassembly)
 
@@ -114,7 +115,26 @@ The `MeshForegroundService` is the heartbeat of the app:
 - **Query Logic**: Searches use a `JOIN` between the standard table and the FTS5 index on the `uuid` column.
 - **Indices**: Non-text columns (`timestamp`, `senderId`, `receiverId`, `groupId`) are indexed with B-Trees for sub-millisecond sorting of the chat feed.
 
-### C. Storage Management
-- **Avatar Engine**: Received profile pictures are decoded from Protobuf (Base64) and saved immediately to the **internal filesystem** (`/data/user/0/.../files/avatars/`).
-- **Database Hygiene**: The database only stores the local **absolute file path**, ensuring the SQLite file size remains small and binary blobs don't fragment the DB pages.
-- **Auto-Pruning**: A background worker runs every 12 hours to delete messages according to the user's `SettingsManager` retention policy.
+## 6. Decentralized Anti-Spam: Proof-of-Work
+
+To prevent Sybil attacks and flooding in 1B+ user environments, Mesh Talk implements a CPU-bound **Proof-of-Work (PoW)** requirement for all broadcasts.
+
+### The PoW Algorithm
+1.  **Nonce Finding**: Before sending, the device iterates through a 64-bit integer (`powNonce`).
+2.  **Hashing**: Calculates $SHA256(UUID + SenderID + Content + Timestamp + Nonce)$.
+3.  **Difficulty**: The resulting hash must have a specific number of leading zero bits (default: 6 bits for reliability).
+4.  **Verification**: Receiving nodes instantly verify the hash. If the PoW is invalid, the packet is dropped and never forwarded or stored.
+
+---
+
+## 7. User Experience & Lifecycle management
+
+### A. Real-Time Online Status
+- **GATT Tracking**: `MeshNetworkManager` maintains a list of currently active GATT connections.
+- **UI Reactivity**: The Chat header subtitle updates in real-time to "Online" when a direct link is established.
+- **Last Seen**: When a peer disconnects, the UI displays a human-readable duration since the last BLE advertisement was received from that Stealth ID.
+
+### B. Smart Notifications
+- **Foreground Awareness**: The `MeshApplication` tracks the `currentChatPeerId`.
+- **Logic**: Notifications are suppressed if the app is in the foreground AND the user is already viewing the specific sender's chat window, preventing redundant alerts.
+- **Image Previews**: Protobuf-level type detection allows notifications to show "Sent an image" instead of raw data blobs.

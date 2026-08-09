@@ -112,6 +112,7 @@ dependencies {
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.tink.android)
     implementation(libs.androidx.security.crypto)
     implementation(libs.zxing.android.embedded)

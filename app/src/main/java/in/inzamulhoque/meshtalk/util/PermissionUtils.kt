@@ -11,16 +11,15 @@ object PermissionUtils {
     fun getRequiredPermissions(): List<String> {
         val permissions = mutableListOf<String>()
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
-            permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
-            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            permissions.add(Manifest.permission.BLUETOOTH)
-            permissions.add(Manifest.permission.BLUETOOTH_ADMIN)
-        }
+        // Android 12+ (minSdk 31)
+        permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+        permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+        permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
         
+        // Optional but recommended for better discovery on some devices
         permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        
+        // Always request Camera for QR scanning
         permissions.add(Manifest.permission.CAMERA)
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

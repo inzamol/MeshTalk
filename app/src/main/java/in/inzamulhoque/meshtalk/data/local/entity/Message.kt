@@ -48,7 +48,9 @@ data class Message(
     
     @Json(name = "mu") val mediaUri: String? = null,
 
-    @Json(name = "g") val groupId: String? = null
+    @Json(name = "g") val groupId: String? = null,
+
+    @Json(name = "pn") val powNonce: Long = 0
 )
 
 @Keep

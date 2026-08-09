@@ -27,6 +27,8 @@ class MeshApplication : Application() {
     var isAppInForeground: Boolean = false
         private set
 
+    var currentChatPeerId: String? = null
+
     var initializationError: Throwable? = null
         private set
 
@@ -38,13 +40,13 @@ class MeshApplication : Application() {
             Log.d("MeshApplication", "[1/5] Initializing SettingsManager...")
             settingsManager = SettingsManager(this)
 
-            Log.d("MeshApplication", "[2/5] Initializing Database...")
-            try {
-                database = Room.databaseBuilder(
+            database = try {
+                Room.databaseBuilder(
                     applicationContext,
                     AppDatabase::class.java,
-                    "meshtalk_db"
-                ).fallbackToDestructiveMigration()
+                    "meshtalk_db",
+                ).addMigrations(AppDatabase.MIGRATION_11_12)
+                    .fallbackToDestructiveMigration(dropAllTables = false)
                     .build()
             } catch (e: Exception) {
                 Log.e("MeshApplication", "Database initialization failed", e)
@@ -76,13 +78,17 @@ class MeshApplication : Application() {
             }
 
             Log.d("MeshApplication", "Registering LifecycleObserver...")
-            ProcessLifecycleOwner.get().lifecycle.addObserver(LifecycleEventObserver { _, event ->
-                if (event == Lifecycle.Event.ON_START) {
-                    isAppInForeground = true
-                } else if (event == Lifecycle.Event.ON_STOP) {
-                    isAppInForeground = false
+            ProcessLifecycleOwner.get().lifecycle.addObserver(
+                LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_START) {
+                        isAppInForeground = true
+                        Log.d("MeshApplication", "App entered FOREGROUND")
+                    } else if (event == Lifecycle.Event.ON_STOP) {
+                        isAppInForeground = false
+                        Log.d("MeshApplication", "App entered BACKGROUND")
+                    }
                 }
-            })
+            )
             Log.i("MeshApplication", "--- Application Initialization Successful ---")
         } catch (e: Throwable) {
             initializationError = e

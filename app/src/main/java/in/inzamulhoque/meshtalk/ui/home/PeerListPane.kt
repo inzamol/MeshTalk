@@ -26,7 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,7 +37,7 @@ fun PeerListPane(
     onCreateGroupClick: () -> Unit,
     onRefresh: () -> Unit,
     onAddPeerClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     val peers by viewModel.peers.collectAsState()
     val showConnectingDevices by viewModel.showConnectingDevices.collectAsState()
@@ -47,7 +47,7 @@ fun PeerListPane(
     LaunchedEffect(Unit) {
         viewModel.refreshSettings()
     }
-    var isRefreshing by remember { mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(value = false) }
     val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
@@ -59,7 +59,7 @@ fun PeerListPane(
                     IconButton(onClick = onSettingsClick) {
                         Icon(Icons.Rounded.Settings, contentDescription = "Settings")
                     }
-                }
+                },
             )
         },
         floatingActionButton = {
@@ -68,7 +68,7 @@ fun PeerListPane(
                     onClick = onCreateGroupClick,
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    modifier = Modifier.padding(bottom = 8.dp),
                 ) {
                     Icon(Icons.Rounded.GroupAdd, contentDescription = "Create Group")
                 }
@@ -87,7 +87,7 @@ fun PeerListPane(
                 coroutineScope.launch {
                     isRefreshing = true
                     onRefresh()
-                    kotlinx.coroutines.delay(2000)
+                    kotlinx.coroutines.delay(2000.milliseconds)
                     isRefreshing = false
                 }
             },
@@ -127,8 +127,9 @@ fun PeerListPane(
                             showConnectingDevices = showConnectingDevices,
                             isActive = activePeerAddresses.contains(model.peer.deviceAddress),
                             onClick = { onPeerClick(model.peer.id) },
-                            onLongClick = { peerToDelete = model.peer }
-                        )
+                        ) {
+                            peerToDelete = model.peer
+                        }
                     }
                 }
             }
@@ -141,10 +142,12 @@ fun PeerListPane(
             title = { Text("Delete Device") },
             text = { Text("Remove ${peerToDelete?.displayName ?: "this device"} from your list?") },
             confirmButton = {
-                TextButton(onClick = {
-                    peerToDelete?.let { viewModel.deletePeer(it) }
-                    peerToDelete = null
-                }) {
+                TextButton(
+                    onClick = {
+                        peerToDelete?.let { viewModel.deletePeer(it) }
+                        peerToDelete = null
+                    }
+                ) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             },
@@ -163,7 +166,7 @@ fun PeerItem(model: PeerUiModel, showConnectingDevices: Boolean, isActive: Boole
     val peer = model.peer
     val isHandshaked = !peer.encryptionKey.isNullOrBlank()
     val hasUnread = model.unreadCount > 0
-    val displayName = if (!isHandshaked && !showConnectingDevices && (peer.displayName == "Connecting..." || peer.displayName == "Mesh Peer")) {
+    val displayName = if ((!isHandshaked && !showConnectingDevices) && ((peer.displayName == "Connecting...") || (peer.displayName == "Mesh Peer"))) {
         "Mesh Peer"
     } else {
         peer.displayName ?: "Unknown Peer"
@@ -206,17 +209,16 @@ fun PeerItem(model: PeerUiModel, showConnectingDevices: Boolean, isActive: Boole
             }
         },
         supportingContent = { 
-            val statusText = if (model.lastMessage != null) {
-                model.lastMessage
-            } else if (isHandshaked) {
-                peer.bio ?: (peer.id.take(16) + "...")
-            } else if (showConnectingDevices) {
-                "Connecting / Handshaking..."
-            } else {
-                peer.id.take(16) + "..."
-            }
+            val statusText = model.lastMessage
+                ?: if (isHandshaked) {
+                    peer.bio ?: (peer.id.take(16) + "...")
+                } else if (showConnectingDevices) {
+                    "Connecting / Handshaking..."
+                } else {
+                    peer.id.take(16) + "..."
+                }
             Text(
-                statusText ?: "",
+                statusText,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Normal,
@@ -229,7 +231,7 @@ fun PeerItem(model: PeerUiModel, showConnectingDevices: Boolean, isActive: Boole
                     val avatarModel = if (peer.avatarUri.startsWith("/")) {
                         peer.avatarUri
                     } else {
-                        try { Base64.decode(peer.avatarUri, Base64.DEFAULT) } catch (e: Exception) { null }
+                        try { Base64.decode(peer.avatarUri, Base64.DEFAULT) } catch (_: Exception) { null }
                     }
                     AsyncImage(
                         model = avatarModel,
@@ -246,7 +248,7 @@ fun PeerItem(model: PeerUiModel, showConnectingDevices: Boolean, isActive: Boole
                     )
                 }
                 
-                if (!isHandshaked && peer.id != MeshProtocol.PUBLIC_GROUP_ID) {
+                if ((!isHandshaked) && (peer.id != MeshProtocol.PUBLIC_GROUP_ID)) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(32.dp),
                         strokeWidth = 2.dp,

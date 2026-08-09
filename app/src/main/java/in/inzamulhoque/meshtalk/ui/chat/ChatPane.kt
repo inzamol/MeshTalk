@@ -1,12 +1,14 @@
 package `in`.inzamulhoque.meshtalk.ui.chat
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -35,17 +37,18 @@ fun ChatPane(
     myId: String,
     onBack: () -> Unit,
     isTwoPane: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     val peer by viewModel.peer.collectAsState()
+    val isOnline by viewModel.isOnline.collectAsState()
     val messages by viewModel.messages.collectAsState()
     var text by remember { mutableStateOf("") }
-    var showMenu by remember { mutableStateOf(false) }
-    var showVerifyDialog by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(value = false) }
+    var showVerifyDialog by remember { mutableStateOf(value = false) }
     var messageToDelete by remember { mutableStateOf<Message?>(null) }
 
     val imagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.GetContent(),
     ) { uri ->
         uri?.let { viewModel.sendImage(it) }
     }
@@ -64,37 +67,76 @@ fun ChatPane(
                                     Icons.Rounded.Verified,
                                     contentDescription = "Verified",
                                     modifier = Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = MaterialTheme.colorScheme.primary,
                                 )
                             }
                         }
+                        
                         if (peer?.id == MeshProtocol.PUBLIC_GROUP_ID) {
                             Text("Public Shout", style = MaterialTheme.typography.labelSmall)
-                        } else if (peer?.id?.contains("-") == true) { 
-                             Text("Group Chat", style = MaterialTheme.typography.labelSmall)
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isOnline) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(Color(0xFF4CAF50), androidx.compose.foundation.shape.CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        "Online",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF4CAF50)
+                                    )
+                                } else {
+                                    peer?.lastSeen?.let {
+                                        Text(
+                                            "Last seen ${viewModel.formatLastSeen(it)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 },
                 navigationIcon = {
                     if (!isTwoPane) {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
+                        IconButton(
+                            onClick = onBack
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
                         }
                     }
                 },
                 actions = {
                     if (peer?.isVerified == false) {
-                        IconButton(onClick = { showVerifyDialog = true }) {
+                        IconButton(
+                            onClick = { showVerifyDialog = true }
+                        ) {
                             Icon(Icons.Rounded.VerifiedUser, contentDescription = "Verify Contact", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
-                    IconButton(onClick = { showMenu = true }) {
+                    IconButton(
+                        onClick = { showMenu = true }
+                    ) {
                         Icon(Icons.Rounded.MoreVert, contentDescription = "Menu")
                     }
                     DropdownMenu(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false }
                     ) {
+                        if (!isOnline && (peer?.id != MeshProtocol.PUBLIC_GROUP_ID)) {
+                            DropdownMenuItem(
+                                text = { Text("Reconnect") },
+                                onClick = {
+                                    viewModel.reconnect()
+                                    showMenu = false
+                                },
+                                leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null) }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Delete Chat") },
                             onClick = {
@@ -110,9 +152,11 @@ fun ChatPane(
         },
         bottomBar = {
             BottomAppBar(
-                contentPadding = PaddingValues(horizontal = 8.dp)
+                contentPadding = PaddingValues(horizontal = 8.dp),
             ) {
-                IconButton(onClick = { imagePicker.launch("image/*") }) {
+                IconButton(
+                    onClick = { imagePicker.launch("image/*") }
+                ) {
                     Icon(Icons.Rounded.Add, contentDescription = "Attach")
                 }
                 TextField(
@@ -123,16 +167,18 @@ fun ChatPane(
                     shape = RoundedCornerShape(24.dp),
                     colors = TextFieldDefaults.colors(
                         focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    )
+                        unfocusedIndicatorColor = Color.Transparent,
+                    ),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                IconButton(onClick = {
-                    if (text.isNotBlank()) {
-                        viewModel.sendMessage(text)
-                        text = ""
+                IconButton(
+                    onClick = {
+                        if (text.isNotBlank()) {
+                            viewModel.sendMessage(text)
+                            text = ""
+                        }
                     }
-                }) {
+                ) {
                     Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Send")
                 }
             }
@@ -150,8 +196,9 @@ fun ChatPane(
                     message = message,
                     isMine = message.senderId == myId,
                     onLongClick = { messageToDelete = message },
-                    onRetryClick = { viewModel.retryMessage(message) }
-                )
+                ) {
+                    viewModel.retryMessage(message)
+                }
             }
         }
     }
@@ -162,10 +209,12 @@ fun ChatPane(
             title = { Text("Delete Message") },
             text = { Text("Are you sure you want to delete this message?") },
             confirmButton = {
-                TextButton(onClick = {
-                    messageToDelete?.let { viewModel.deleteMessage(it) }
-                    messageToDelete = null
-                }) {
+                TextButton(
+                    onClick = {
+                        messageToDelete?.let { viewModel.deleteMessage(it) }
+                        messageToDelete = null
+                    }
+                ) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             },
@@ -224,14 +273,14 @@ fun MessageBubble(
         RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp)
     }
 
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
+    val bubblePadding = if (isMine) PaddingValues(start = 60.dp, end = 8.dp) else PaddingValues(start = 8.dp, end = 60.dp)
+
+    Box(modifier = Modifier.fillMaxWidth().padding(bubblePadding).padding(vertical = 2.dp), contentAlignment = alignment) {
         Surface(
             color = containerColor,
             contentColor = contentColor,
             shape = shape,
             modifier = Modifier
-                .padding(vertical = 4.dp, horizontal = 8.dp)
-                .widthIn(max = 300.dp)
                 .combinedClickable(
                     onClick = {
                         if (message.status == MessageStatus.FAILED) {
@@ -243,12 +292,12 @@ fun MessageBubble(
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (message.type == MessageType.IMAGE) {
-                    val imageData = if (isMine && message.mediaUri != null) {
+                    val imageData = if (isMine && (message.mediaUri != null)) {
                         message.mediaUri
                     } else {
                         try {
                             Base64.decode(message.content, Base64.DEFAULT)
-                        } catch (e: Exception) { null }
+                        } catch (_: Exception) { null }
                     }
                     
                     AsyncImage(
@@ -315,19 +364,20 @@ fun MessageStatusIcon(status: MessageStatus) {
             tint = MaterialTheme.colorScheme.outline
         )
         MessageStatus.READ -> Row(verticalAlignment = Alignment.CenterVertically) {
+            val readColor = Color(0xFF00BFFF)
             Icon(
                 Icons.Rounded.DoneAll,
                 contentDescription = null,
                 modifier = Modifier.size(12.dp),
-                tint = Color(0xFF00BFFF)
+                tint = readColor
             )
             Icon(
                 Icons.Rounded.Done,
                 contentDescription = "Read",
                 modifier = Modifier
                     .size(12.dp)
-                    .offset(x = (-8).dp),
-                tint = Color(0xFF00BFFF)
+                    .offset(x = (-6).dp),
+                tint = readColor
             )
         }
         MessageStatus.FAILED -> Icon(

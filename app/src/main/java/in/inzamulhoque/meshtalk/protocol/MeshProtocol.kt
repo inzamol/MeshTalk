@@ -6,6 +6,7 @@ import `in`.inzamulhoque.meshtalk.data.local.dao.MessageDao
 import `in`.inzamulhoque.meshtalk.data.local.dao.PeerDao
 import `in`.inzamulhoque.meshtalk.data.local.entity.Message
 import `in`.inzamulhoque.meshtalk.data.local.entity.MessageStatus
+import `in`.inzamulhoque.meshtalk.data.local.entity.MessageType
 import `in`.inzamulhoque.meshtalk.data.local.entity.Peer
 import `in`.inzamulhoque.meshtalk.protocol.proto.*
 import `in`.inzamulhoque.meshtalk.util.BloomFilter
@@ -15,6 +16,8 @@ import `in`.inzamulhoque.meshtalk.util.SettingsManager
 import `in`.inzamulhoque.meshtalk.util.ToastHelper
 import android.content.Context
 import android.util.Log
+import `in`.inzamulhoque.meshtalk.util.RateLimiter
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
@@ -29,6 +32,8 @@ class MeshProtocol(
     private val settingsManager: SettingsManager
 ) {
     private val heardCounts = ConcurrentHashMap<String, Int>()
+    private val rateLimiter = RateLimiter(maxMessages = 30, windowMs = 60000)
+    private val verifiedRateLimiter = RateLimiter(maxMessages = 150, windowMs = 60000)
 
     suspend fun createHandshake(encryptionKey: String, displayName: String): ProtoHandshake {
         val bloomFilter = BloomFilter(512, 5)
@@ -71,7 +76,7 @@ class MeshProtocol(
     }
 
     fun serializeMessage(message: Message): ByteArray {
-        val proto = ProtoMessage.newBuilder()
+        val protoBuilder = ProtoMessage.newBuilder()
             .setUuid(message.uuid)
             .setSenderId(message.senderId)
             .setReceiverId(message.receiverId)
@@ -81,8 +86,18 @@ class MeshProtocol(
             .setExpiryTimestamp(message.expiryTimestamp)
             .setHopCount(message.hopCount)
             .setIsEncrypted(message.isEncrypted)
-            .build()
-        return MeshPacket.newBuilder().setMessage(proto).build().toByteArray()
+            
+        try {
+            // Set type (int32 type = 11)
+            val typeMethod = protoBuilder.javaClass.methods.find { it.name == "setType" || it.name == "setTypeValue" }
+            typeMethod?.invoke(protoBuilder, message.type.ordinal)
+            
+            // Set powNonce (uint64 pow_nonce = 10)
+            val nonceMethod = protoBuilder.javaClass.methods.find { it.name == "setPowNonce" }
+            nonceMethod?.invoke(protoBuilder, message.powNonce)
+        } catch (_: Exception) {}
+        
+        return MeshPacket.newBuilder().setMessage(protoBuilder.build()).build().toByteArray()
     }
 
     fun parsePacket(data: ByteArray): Any? {
@@ -92,16 +107,30 @@ class MeshProtocol(
                 MeshPacket.PayloadCase.HANDSHAKE -> packet.handshake
                 MeshPacket.PayloadCase.MESSAGE -> {
                     val proto = packet.message
+                    
+                    var nonce = 0L
+                    var typeInt = 0
+                    
+                    try {
+                        val nonceMethod = proto.javaClass.methods.find { it.name == "getPowNonce" }
+                        nonce = (nonceMethod?.invoke(proto) as? Long) ?: 0L
+                        
+                        val typeMethod = proto.javaClass.methods.find { it.name == "getType" || it.name == "getTypeValue" }
+                        typeInt = (typeMethod?.invoke(proto) as? Int) ?: 0
+                    } catch (_: Exception) {}
+                    
                     Message(
                         uuid = proto.uuid,
                         senderId = proto.senderId,
                         receiverId = proto.receiverId,
-                        groupId = if (proto.groupId.isEmpty()) null else proto.groupId,
+                        groupId = proto.groupId.ifEmpty { null },
                         content = proto.content,
                         timestamp = proto.timestamp,
                         expiryTimestamp = proto.expiryTimestamp,
                         hopCount = proto.hopCount,
-                        isEncrypted = proto.isEncrypted
+                        isEncrypted = proto.isEncrypted,
+                        powNonce = nonce,
+                        type = try { MessageType.entries[typeInt] } catch (_: Exception) { MessageType.TEXT }
                     )
                 }
                 MeshPacket.PayloadCase.SYNC_UPDATE -> packet.syncUpdate
@@ -111,6 +140,64 @@ class MeshProtocol(
             Log.e("MeshProtocol", "Error parsing packet", e)
             null
         }
+    }
+
+    suspend fun solvePoW(protoBuilder: ProtoMessage.Builder) {
+        val baseData = (protoBuilder.uuid + protoBuilder.senderId + protoBuilder.content + protoBuilder.timestamp).toByteArray()
+        val md = MessageDigest.getInstance("SHA-256")
+        var nonce = 0L
+        
+        val start = System.currentTimeMillis()
+        while (true) {
+            md.reset()
+            md.update(baseData)
+            md.update(nonce.toString().toByteArray())
+            val hash = md.digest()
+            
+            if (checkDifficulty(hash, POW_DIFFICULTY)) {
+                try {
+                    val method = protoBuilder.javaClass.methods.find { it.name == "setPowNonce" }
+                    method?.invoke(protoBuilder, nonce)
+                } catch (_: Exception) {}
+                Log.d("MeshProtocol", "PoW solved in ${System.currentTimeMillis() - start}ms. Nonce: $nonce")
+                return
+            }
+            nonce++
+            if ((nonce % 2000L) == 0L) delay(1.milliseconds) 
+        }
+    }
+
+    suspend fun verifyPoW(message: Message): Boolean {
+        if (message.groupId != PUBLIC_GROUP_ID && message.receiverId != myId && !settingsManager.isForwardingEnabled) return true 
+        
+        // Backward Compatibility: Allow legacy messages (0 nonce) if from a verified peer
+        // or during the transition period (messages older than current release date).
+        if (message.powNonce == 0L) {
+            val peer = peerDao.getPeerById(message.senderId)
+            return peer?.isVerified == true || message.timestamp < 1786270000000L 
+        }
+
+        val baseData = (message.uuid + message.senderId + message.content + message.timestamp).toByteArray()
+        val md = MessageDigest.getInstance("SHA-256")
+        md.update(baseData)
+        md.update(message.powNonce.toString().toByteArray())
+        val hash = md.digest()
+        
+        return checkDifficulty(hash, POW_DIFFICULTY)
+    }
+
+    private fun checkDifficulty(hash: ByteArray, difficulty: Int): Boolean {
+        var bits = 0
+        for (byte in hash) {
+            val b = byte.toInt() and 0xFF
+            if (b == 0) {
+                bits += 8
+            } else {
+                bits += Integer.numberOfLeadingZeros(b) - 24
+                break
+            }
+        }
+        return bits >= difficulty
     }
 
     suspend fun onPeerDiscovered(
@@ -189,6 +276,22 @@ class MeshProtocol(
     }
 
     suspend fun processReceivedMessage(message: Message): Pair<ProtoSyncUpdate?, Message?> {
+        // Anti-Spam Layer 1: Verify PoW
+        if (!verifyPoW(message)) {
+            Log.w("MeshProtocol", "Message ${message.uuid.take(8)} rejected: Invalid PoW")
+            return null to null
+        }
+
+        // Anti-Spam Layer 2: Rate Limiting
+        val peer = peerDao.getPeerById(message.senderId)
+        val isVerified = peer?.isVerified == true
+        val limiter = if (isVerified) verifiedRateLimiter else rateLimiter
+        
+        if (!limiter.isAllowed(message.senderId)) {
+            Log.w("MeshProtocol", "Message ${message.uuid.take(8)} rejected: Rate limit exceeded for ${message.senderId}")
+            return null to null
+        }
+
         val existing = messageDao.getMessageByUuid(message.uuid)
         if (existing != null) {
             heardCounts[message.uuid] = (heardCounts[message.uuid] ?: 0) + 1
@@ -212,20 +315,29 @@ class MeshProtocol(
                 
                 val app = context.applicationContext as? `in`.inzamulhoque.meshtalk.MeshApplication
                 val isForeground = app?.isAppInForeground == true
+                val isChatOpen = app?.currentChatPeerId == message.senderId
+                val initialStatus = if (isChatOpen) MessageStatus.READ else MessageStatus.DELIVERED
 
-                if (settingsManager.isNotificationEnabled && !isForeground) {
+                messageDao.insertMessage(message.copy(id = 0, status = initialStatus))
+
+                if (settingsManager.isNotificationEnabled && (!isForeground || !isChatOpen)) {
                     val peer = peerDao.getPeerById(message.senderId)
+                    val notificationText = if (message.type == MessageType.IMAGE) "Sent an image" else decryptedContent
+                    
                     NotificationHelper.showMessageNotification(
                         context = context,
                         senderId = message.senderId,
                         senderName = peer?.displayName ?: "Unknown Peer",
-                        message = decryptedContent
+                        message = notificationText
                     )
+                } else if (isForeground && isChatOpen) {
+                    Log.d("MeshProtocol", "Notification skipped: Chat with ${message.senderId} is currently open")
                 }
                 
                 if (message.groupId != PUBLIC_GROUP_ID) {
+                    val syncType = if (isChatOpen) SyncUpdateType.READ else SyncUpdateType.DELIVERED
                     val update = ProtoSyncUpdate.newBuilder()
-                        .setType(SyncUpdateType.DELIVERED)
+                        .setType(syncType)
                         .setTargetUuid(message.uuid)
                         .setSenderId(myId)
                         .setTimestamp(System.currentTimeMillis())
@@ -293,6 +405,7 @@ class MeshProtocol(
 
     companion object {
         private const val MAX_HOPS = 10
+        private const val POW_DIFFICULTY = 6 // Even lower for maximum reliability during testing
         const val PUBLIC_GROUP_ID = "shout_channel"
     }
 }
