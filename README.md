@@ -56,7 +56,16 @@ Mesh Talk implements industrial-grade optimizations for decentralized communicat
     ```
 2.  **Open in Android Studio** (Ladybug or newer).
 3.  **Sync & Build**: Run Gradle sync to generate Protobuf sources and indices.
-4.  **Run**: Connect devices and click `Run 'app'`.
+4.  **Signing Configuration**: To build a signed release APK, create a `signing.properties` file in the project root (this file is ignored by Git).
+    
+    **Example `signing.properties`:**
+    ```properties
+    STORE_FILE=release.jks
+    STORE_PASSWORD=your_keystore_password
+    KEY_ALIAS=your_key_alias
+    KEY_PASSWORD=your_key_password
+    ```
+5.  **Run**: Connect devices and click `Run 'app'`.
 
 ---
 
