@@ -157,7 +157,8 @@ fun MainScreen(
                                         database = app.database,
                                         settingsManager = app.settingsManager,
                                         identityManager = app.identityManager,
-                                        meshNetworkManager = app.meshNetworkManager
+                                        meshNetworkManager = app.meshNetworkManager,
+                                        updateManager = app.updateManager
                                     ) as T
                                 }
                             }

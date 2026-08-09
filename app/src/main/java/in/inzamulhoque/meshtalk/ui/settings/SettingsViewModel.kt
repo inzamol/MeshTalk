@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import `in`.inzamulhoque.meshtalk.data.local.AppDatabase
 import `in`.inzamulhoque.meshtalk.util.SettingsManager
+import `in`.inzamulhoque.meshtalk.util.update.GitHubUpdateManager
+import `in`.inzamulhoque.meshtalk.util.update.UpdateState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -12,10 +14,12 @@ class SettingsViewModel(
     private val database: AppDatabase,
     private val settingsManager: SettingsManager,
     private val identityManager: `in`.inzamulhoque.meshtalk.crypto.IdentityManager,
-    private val meshNetworkManager: `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager
+    private val meshNetworkManager: `in`.inzamulhoque.meshtalk.ble.MeshNetworkManager,
+    private val updateManager: GitHubUpdateManager
 ) : ViewModel() {
 
     val myId = identityManager.getMyId()
+    val updateState = updateManager.updateState
 
     private val _displayName = MutableStateFlow(settingsManager.displayName ?: "")
     val displayName = _displayName.asStateFlow()
@@ -172,5 +176,19 @@ class SettingsViewModel(
             }
         }
         return peerId
+    }
+
+    fun checkForUpdates() {
+        viewModelScope.launch {
+            updateManager.checkForUpdates()
+        }
+    }
+
+    fun downloadAndInstallUpdate(release: `in`.inzamulhoque.meshtalk.util.update.GithubRelease) {
+        updateManager.downloadAndInstall(release)
+    }
+
+    fun installApk(file: java.io.File) {
+        updateManager.installApk(file)
     }
 }

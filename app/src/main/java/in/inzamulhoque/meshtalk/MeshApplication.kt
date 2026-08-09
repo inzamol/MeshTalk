@@ -7,6 +7,7 @@ import `in`.inzamulhoque.meshtalk.crypto.CryptoManager
 import `in`.inzamulhoque.meshtalk.crypto.IdentityManager
 import `in`.inzamulhoque.meshtalk.data.local.AppDatabase
 import `in`.inzamulhoque.meshtalk.util.SettingsManager
+import `in`.inzamulhoque.meshtalk.util.update.GitHubUpdateManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -22,6 +23,8 @@ class MeshApplication : Application() {
     lateinit var meshNetworkManager: MeshNetworkManager
         private set
     lateinit var settingsManager: SettingsManager
+        private set
+    lateinit var updateManager: GitHubUpdateManager
         private set
 
     var isAppInForeground: Boolean = false
@@ -76,6 +79,8 @@ class MeshApplication : Application() {
                 Log.e("MeshApplication", "MeshNetworkManager initialization failed", e)
                 throw RuntimeException("Network failed to initialize: ${e.message}", e)
             }
+
+            updateManager = GitHubUpdateManager(this)
 
             Log.d("MeshApplication", "Registering LifecycleObserver...")
             ProcessLifecycleOwner.get().lifecycle.addObserver(
