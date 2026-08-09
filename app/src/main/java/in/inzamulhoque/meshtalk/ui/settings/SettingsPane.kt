@@ -10,7 +10,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -29,6 +28,7 @@ import `in`.inzamulhoque.meshtalk.util.QRUtils
 import androidx.camera.core.ExperimentalGetImage
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import `in`.inzamulhoque.meshtalk.util.update.UpdateState
 
 @androidx.camera.core.ExperimentalGetImage
 @OptIn(ExperimentalMaterial3Api::class)
@@ -36,7 +36,7 @@ import androidx.compose.ui.text.style.TextAlign
 fun SettingsPane(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
-    onNavigateToChat: (String) -> Unit = {}
+    onNavigateToChat: (String) -> Unit = {},
 ) {
     val displayName by viewModel.displayName.collectAsState()
     val bio by viewModel.bio.collectAsState()
@@ -52,6 +52,7 @@ fun SettingsPane(
     val pruneOwnDays by viewModel.pruneOwnDays.collectAsState()
     val isEditMode by viewModel.isEditMode.collectAsState()
     val publicShoutEnabled by viewModel.publicShoutEnabled.collectAsState()
+    val updateState by viewModel.updateState.collectAsState()
     
     var showDeleteMessagesDialog by remember { mutableStateOf(false) }
     var showDeletePeersDialog by remember { mutableStateOf(false) }
@@ -348,6 +349,75 @@ fun SettingsPane(
                             valueRange = 30f..730f,
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                Text("App Update", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                
+                when (val state = updateState) {
+                    is UpdateState.Idle, UpdateState.NoUpdateAvailable -> {
+                        Button(
+                            onClick = { viewModel.checkForUpdates() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Rounded.SystemUpdate, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (state is UpdateState.NoUpdateAvailable) "Up to date (Check again)" else "Check for Updates")
+                        }
+                    }
+                    is UpdateState.Checking -> {
+                        Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth()) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Checking...")
+                        }
+                    }
+                    is UpdateState.NewVersionAvailable -> {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text("New version available: ${state.release.tagName}", fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(state.release.body.take(100) + "...", style = MaterialTheme.typography.bodySmall)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = { viewModel.downloadAndInstallUpdate(state.release) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Rounded.Download, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Download & Install")
+                                }
+                            }
+                        }
+                    }
+                    is UpdateState.Downloading -> {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            Text("Downloading update...", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    is UpdateState.ReadyToInstall -> {
+                        Button(
+                            onClick = { 
+                                viewModel.installApk(state.apkFile)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary, contentColor = MaterialTheme.colorScheme.onTertiary)
+                        ) {
+                            Icon(Icons.Rounded.InstallMobile, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Install Now")
+                        }
+                    }
+                    is UpdateState.Error -> {
+                        Text(state.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        Button(onClick = { viewModel.checkForUpdates() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Retry Check")
+                        }
                     }
                 }
 
