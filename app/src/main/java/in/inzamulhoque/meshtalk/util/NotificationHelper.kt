@@ -36,7 +36,7 @@ object NotificationHelper {
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_send)
+            .setSmallIcon(R.drawable.ic_mesh_logo)
             .setContentTitle(senderName)
             .setContentText(message)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

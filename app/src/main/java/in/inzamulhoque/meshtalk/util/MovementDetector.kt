@@ -2,49 +2,47 @@ package `in`.inzamulhoque.meshtalk.util
 
 import android.content.Context
 import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.hardware.TriggerEvent
+import android.hardware.TriggerEventListener
+import android.util.Log
 
-class MovementDetector(context: Context, private val onMovementDetected: () -> Unit) : SensorEventListener {
+/**
+ * Uses the low-power Significant Motion Sensor to detect when the device is moved.
+ * This is much more battery efficient than using the raw Accelerometer.
+ */
+class MovementDetector(context: Context, private val onMovementDetected: () -> Unit) {
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    private val motionSensor = sensorManager.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION)
     
-    private var lastX = 0f
-    private var lastY = 0f
-    private var lastZ = 0f
-    private val threshold = 0.5f // Sensitivity threshold for movement
+    private val triggerListener = object : TriggerEventListener() {
+        override fun onTrigger(event: TriggerEvent?) {
+            Log.d("MovementDetector", "Significant motion detected")
+            onMovementDetected()
+            
+            // Significant Motion Sensor is a one-shot sensor. 
+            // We must re-register after every trigger.
+            requestTrigger()
+        }
+    }
     
     fun start() {
-        accelerometer?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+        if (motionSensor == null) {
+            Log.w("MovementDetector", "Significant Motion sensor not available on this device")
+            return
+        }
+        requestTrigger()
+    }
+    
+    private fun requestTrigger() {
+        motionSensor?.let {
+            sensorManager.requestTriggerSensor(triggerListener, it)
         }
     }
     
     fun stop() {
-        sensorManager.unregisterListener(this)
-    }
-
-    override fun onSensorChanged(event: SensorEvent) {
-        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-            val x = event.values[0]
-            val y = event.values[1]
-            val z = event.values[2]
-            
-            val deltaX = Math.abs(lastX - x)
-            val deltaY = Math.abs(lastY - y)
-            val deltaZ = Math.abs(lastZ - z)
-            
-            // Basic delta check to detect significant movement
-            if (deltaX > threshold || deltaY > threshold || deltaZ > threshold) {
-                onMovementDetected()
-            }
-            
-            lastX = x
-            lastY = y
-            lastZ = z
+        motionSensor?.let {
+            sensorManager.cancelTriggerSensor(triggerListener, it)
         }
     }
-
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 }

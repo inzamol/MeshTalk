@@ -37,7 +37,10 @@ Mesh Talk utilizes the **Google Tink** library for industrial-grade, multi-langu
 
 ### E. Sybil Attacks (Mesh Flooding)
 *   **Threat**: An attacker creates thousands of virtual nodes to overwhelm the mesh with garbage data.
-*   **Mitigation**: **Gossip v2 Suppression**. The counter-based suppression logic limits the rate at which any single node re-broadcasts data. Additionally, `hopCount` limits prevent infinite packet loops.
+*   **Mitigation**: 
+    1. **Proof-of-Work (PoW)**: Every message requires a computational nonce. This makes mass-spamming expensive for attackers while remaining cheap for legitimate users.
+    2. **Sliding Window Rate Limiting**: The mesh protocol drops packets from peers exceeding 30 msgs/min (Standard) or 150 msgs/min (Verified).
+    3. **Gossip v2 Suppression**: Prevents redundant re-broadcasts in high-density areas.
 
 ---
 

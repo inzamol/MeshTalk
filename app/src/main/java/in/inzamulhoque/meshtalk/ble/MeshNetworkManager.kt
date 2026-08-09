@@ -9,19 +9,23 @@ import `in`.inzamulhoque.meshtalk.data.local.AppDatabase
 import `in`.inzamulhoque.meshtalk.data.local.entity.Message
 import `in`.inzamulhoque.meshtalk.data.local.entity.MessageStatus
 import `in`.inzamulhoque.meshtalk.protocol.MeshProtocol
-import `in`.inzamulhoque.meshtalk.util.FileUtils
 import `in`.inzamulhoque.meshtalk.util.MovementDetector
 import `in`.inzamulhoque.meshtalk.util.SettingsManager
+import `in`.inzamulhoque.meshtalk.protocol.proto.ProtoMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import androidx.work.*
+import `in`.inzamulhoque.meshtalk.worker.IdentityRotationWorker
+import `in`.inzamulhoque.meshtalk.worker.PruningWorker
+import java.util.concurrent.TimeUnit
 import java.nio.ByteBuffer
-import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -34,7 +38,7 @@ class MeshNetworkManager(
     private val bluetoothManager = context.getSystemService(BluetoothManager::class.java)
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
     
-    private val protocol = MeshProtocol(
+    val protocol = MeshProtocol(
         context = context,
         myId = identityManager.getMyId(),
         messageDao = database.messageDao(),
@@ -65,12 +69,16 @@ class MeshNetworkManager(
     fun getMyEncryptionKey() = identityManager.getMyEncryptionKey()
     fun getMyDisplayName() = myDisplayName
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val activeClients = mutableMapOf<String, MeshGattClient>()
     private val connectionCooldowns = mutableMapOf<String, Long>()
     
     private var lastMovementTime = System.currentTimeMillis()
     private val movementDetector = MovementDetector(context) {
+        onActivityDetected()
+    }
+
+    fun onActivityDetected() {
         lastMovementTime = System.currentTimeMillis()
     }
     
@@ -86,17 +94,16 @@ class MeshNetworkManager(
 
     private var autoReconnectJob: kotlinx.coroutines.Job? = null
     private var timeoutCheckJob: kotlinx.coroutines.Job? = null
-    private var pruningJob: kotlinx.coroutines.Job? = null
-    private var rotationJob: kotlinx.coroutines.Job? = null
 
     fun start() {
         Log.d("MeshNetworkManager", "Starting MeshNetworkManager. Stealth ID: ${identityManager.getStealthId().joinToString("") { "%02x".format(it) }}")
         myDisplayName = identityManager.getDisplayName()
         
         if (bluetoothAdapter?.isEnabled == true) {
-            bleManager?.startAdvertising()
+            // Start in low power mode by default
+            bleManager?.startAdvertising(lowPower = true)
             if (settingsManager.isContinuousSearchEnabled) {
-                bleManager?.startScanning()
+                bleManager?.startScanning(lowPower = true)
             }
             if (settingsManager.isMovementSensingEnabled) {
                 movementDetector.start()
@@ -104,8 +111,7 @@ class MeshNetworkManager(
             gattServer.start()
             startAutoReconnectLoop()
             startTimeoutCheckLoop()
-            startPruningLoop()
-            startRotationLoop()
+            scheduleBackgroundWork()
         }
     }
 
@@ -139,78 +145,93 @@ class MeshNetworkManager(
         timeoutCheckJob = scope.launch {
             while (true) {
                 delay(30.seconds) 
-                val threshold = System.currentTimeMillis() - 5 * 60 * 1000
+                val threshold = System.currentTimeMillis() - (5 * 60 * 1000)
                 database.messageDao().markTimedOutMessagesAsFailed(threshold)
             }
         }
     }
 
-    private fun startPruningLoop() {
-        pruningJob?.cancel()
-        pruningJob = scope.launch {
-            while (true) {
-                try {
-                    val now = System.currentTimeMillis()
-                    val myId = identityManager.getMyId()
-                    
-                    // Prune others messages
-                    val othersThreshold = now - (settingsManager.pruneOthersMessagesDays.toLong() * 24 * 60 * 60 * 1000)
-                    database.messageDao().pruneOthersMessages(myId, othersThreshold)
-                    
-                    // Prune own messages if enabled
-                    if (settingsManager.isPruningOwnMessagesEnabled) {
-                        val ownThreshold = now - (settingsManager.pruneOwnMessagesDays.toLong() * 24 * 60 * 60 * 1000)
-                        database.messageDao().pruneOwnMessages(myId, ownThreshold)
-                    }
-                } catch (e: Exception) {
-                    Log.e("MeshNetworkManager", "Error in pruning loop", e)
-                }
-                delay(12.hours)
-            }
-        }
+    private fun scheduleBackgroundWork() {
+        val workManager = WorkManager.getInstance(context)
+
+        // 1. Identity Rotation (Every 15 minutes)
+        val rotationRequest = PeriodicWorkRequestBuilder<IdentityRotationWorker>(
+            15, TimeUnit.MINUTES
+        ).setBackoffCriteria(
+            BackoffPolicy.LINEAR,
+            WorkRequest.MIN_BACKOFF_MILLIS,
+            TimeUnit.MILLISECONDS
+        ).build()
+
+        workManager.enqueueUniquePeriodicWork(
+            "identity_rotation",
+            ExistingPeriodicWorkPolicy.KEEP,
+            rotationRequest
+        )
+
+        // 2. Database Pruning (Every 12 hours, while charging/idle)
+        val constraints = Constraints.Builder()
+            .setRequiresCharging(requiresCharging = true)
+            .setRequiresDeviceIdle(requiresDeviceIdle = true)
+            .build()
+
+        val pruningRequest = PeriodicWorkRequestBuilder<PruningWorker>(
+            12, TimeUnit.HOURS
+        ).setConstraints(constraints)
+         .build()
+
+        workManager.enqueueUniquePeriodicWork(
+            "database_pruning",
+            ExistingPeriodicWorkPolicy.KEEP,
+            pruningRequest
+        )
     }
 
-    private fun startRotationLoop() {
-        rotationJob?.cancel()
-        rotationJob = scope.launch {
-            while (true) {
-                val now = System.currentTimeMillis()
-                val windowMs = 15 * 60 * 1000
-                val nextWindow = ((now / windowMs) + 1) * windowMs
-                
-                // Sleep until next window
-                delay(nextWindow - now + 1000) 
-                
-                Log.d("MeshNetworkManager", "Rotating Stealth ID...")
-                bleManager?.updateAdvertisingId(identityManager.getStealthId())
-            }
+    fun rotateStealthId(newId: ByteArray) {
+        scope.launch {
+            Log.d("MeshNetworkManager", "Rotating Stealth ID...")
+            bleManager?.updateAdvertisingId(newId)
         }
     }
 
     private fun startAutoReconnectLoop() {
         autoReconnectJob?.cancel()
         autoReconnectJob = scope.launch {
+            var wasMoving = true // Track state change to avoid redundant restarts
+            
             while (true) {
                 val nowTime = System.currentTimeMillis()
                 
                 // Adaptive delay based on movement
-                val isMoving = nowTime - lastMovementTime < 30000 // 30 seconds since last movement
+                val isMoving = nowTime - lastMovementTime < 60000 // 1 minute since last movement
                 val scanInterval = if (!settingsManager.isMovementSensingEnabled || isMoving) {
-                    15.seconds
+                    30.seconds // Moving: Search more frequently
                 } else {
-                    2.minutes
+                    5.minutes // Stationary: Search very infrequently
                 }
                 
+                // Handle mode transition for scanner and advertiser
+                if (isMoving != wasMoving) {
+                    Log.d("MeshNetworkManager", "Movement state changed. isMoving: $isMoving. Adjusting power modes.")
+                    bleManager?.startAdvertising(lowPower = !isMoving)
+                    if (settingsManager.isContinuousSearchEnabled) {
+                        bleManager?.startScanning(lowPower = !isMoving)
+                    }
+                    wasMoving = isMoving
+                }
+
                 delay(scanInterval)
                 
                 if (settingsManager.isContinuousSearchEnabled) {
-                    // If stationary, maybe stop scanning temporarily to save battery?
+                    // If stationary, pause scanning for long periods to save battery
                     if (settingsManager.isMovementSensingEnabled && !isMoving) {
                         Log.d("MeshNetworkManager", "Stationary detected, pausing scan to save battery")
                         bleManager?.stopScanning()
-                        delay(10.seconds) // Keep it stopped for a bit
+                        delay(20.seconds) 
+                        bleManager?.startScanning(lowPower = true)
                     } else {
-                        bleManager?.startScanning()
+                        // Ensure scanning is active when moving
+                        bleManager?.startScanning(lowPower = false)
                     }
                 }
 
@@ -232,8 +253,6 @@ class MeshNetworkManager(
     fun stop() {
         autoReconnectJob?.cancel()
         timeoutCheckJob?.cancel()
-        pruningJob?.cancel()
-        rotationJob?.cancel()
         movementDetector.stop()
         bleManager?.stopAdvertising()
         bleManager?.stopScanning()
@@ -262,7 +281,7 @@ class MeshNetworkManager(
             if (existing == null) {
                 val initialName = if (settingsManager.isShowConnectingDevicesEnabled) "Connecting..." else "Mesh Peer"
                 protocol.onPeerDiscovered(deviceAddress, "", null, initialName, deviceAddress, rssi = rssi)
-            } else if (now - existing.lastSeen > 10000 || Math.abs(existing.rssi - rssi) > 5) {
+            } else if (now - existing.lastSeen > 10000 || kotlin.math.abs(existing.rssi - rssi) > 5) {
                 database.peerDao().updatePeer(existing.copy(lastSeen = now, rssi = rssi))
             }
             
@@ -270,7 +289,7 @@ class MeshNetworkManager(
             val peerIdHash = try { 
                 if (peerShortId.size >= 4) ByteBuffer.wrap(peerShortId).int.toLong() and 0xFFFFFFFFL
                 else java.lang.Long.parseLong(deviceAddress.replace(":", ""), 16)
-            } catch (e: Exception) { 0L }
+            } catch (_: Exception) { 0L }
             
             if (myIdHash < peerIdHash) {
                 connectToPeer(deviceAddress)
@@ -303,8 +322,36 @@ class MeshNetworkManager(
     }
 
     fun broadcastMessage(message: Message) {
-        val data = protocol.serializeMessage(message)
         scope.launch {
+            // Anti-Spam: Solve PoW in a background scope that survives UI cancellation
+            val protoBuilder = ProtoMessage.newBuilder()
+                .setUuid(message.uuid)
+                .setSenderId(message.senderId)
+                .setReceiverId(message.receiverId)
+                .setGroupId(message.groupId ?: "")
+                .setContent(message.content)
+                .setTimestamp(message.timestamp)
+                .setExpiryTimestamp(message.expiryTimestamp)
+                .setHopCount(message.hopCount)
+                .setIsEncrypted(message.isEncrypted)
+            
+            protocol.solvePoW(protoBuilder)
+            
+            val solvedNonce = try {
+                val field = protoBuilder.javaClass.getDeclaredField("powNonce_")
+                field.isAccessible = true
+                field.get(protoBuilder) as Long
+            } catch (_: Exception) {
+                try {
+                    val method = protoBuilder.javaClass.getMethod("getPowNonce")
+                    method.invoke(protoBuilder) as Long
+                } catch (_: Exception) { 0L }
+            }
+
+            val finalMessage = message.copy(powNonce = solvedNonce)
+            database.messageDao().insertMessage(finalMessage)
+
+            val data = protocol.serializeMessage(finalMessage)
             var sent = false
             
             // Try sending to currently active clients
@@ -326,7 +373,10 @@ class MeshNetworkManager(
             if (gattServer.getConnectedDevicesCount() > 0) sent = true
 
             if (sent) {
-                database.messageDao().updateMessageStatus(message.id, MessageStatus.SENT.name)
+                Log.d("MeshNetworkManager", "Message ${finalMessage.uuid.take(8)} sent successfully to mesh")
+                database.messageDao().updateMessageStatus(finalMessage.id, MessageStatus.SENT.name)
+            } else {
+                Log.w("MeshNetworkManager", "Message ${finalMessage.uuid.take(8)} queued but no active peers found")
             }
         }
     }

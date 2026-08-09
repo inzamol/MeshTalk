@@ -17,13 +17,19 @@ class MeshBLEManager(
 ) {
     private var isScanning = false
     private var isAdvertising = false
+    private var currentScanLowPower: Boolean? = null
+    private var currentAdsLowPower: Boolean? = null
 
     @SuppressLint("MissingPermission")
-    fun startAdvertising() {
-        Log.d("MeshBLEManager", "Requesting to start advertising. isAdvertising: $isAdvertising")
-        if (isAdvertising) return
+    fun startAdvertising(lowPower: Boolean = false) {
+        if (isAdvertising && currentAdsLowPower == lowPower) return
+        Log.d("MeshBLEManager", "Starting advertising. lowPower: $lowPower")
         
-        // Permission check
+        if (isAdvertising) {
+            stopAdvertising() 
+        }
+        
+        // ... (permission checks)
         if (!PermissionUtils.hasPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE)) {
             Log.e("MeshBLEManager", "Missing BLUETOOTH_ADVERTISE permission")
             return
@@ -36,10 +42,10 @@ class MeshBLEManager(
         }
 
         val settings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+            .setAdvertiseMode(if (lowPower) AdvertiseSettings.ADVERTISE_MODE_LOW_POWER else AdvertiseSettings.ADVERTISE_MODE_BALANCED)
             .setConnectable(true)
             .setTimeout(0)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+            .setTxPowerLevel(if (lowPower) AdvertiseSettings.ADVERTISE_TX_POWER_LOW else AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
             .build()
 
         val data = AdvertiseData.Builder()
@@ -55,28 +61,34 @@ class MeshBLEManager(
         try {
             advertiser.startAdvertising(settings, data, scanResponse, advertiseCallback)
             isAdvertising = true
-        } catch (e: SecurityException) {
-            Log.e("MeshBLEManager", "Permission denied for advertising", e)
+            currentAdsLowPower = lowPower
+        } catch (e: Exception) {
+            Log.e("MeshBLEManager", "Failed to start advertising", e)
         }
     }
 
+    @SuppressLint("MissingPermission")
     fun stopAdvertising() {
         Log.d("MeshBLEManager", "Stopping advertising")
         if (!isAdvertising) return
         try {
             bluetoothAdapter.bluetoothLeAdvertiser?.stopAdvertising(advertiseCallback)
-            isAdvertising = false
-        } catch (e: SecurityException) {
-            Log.e("MeshBLEManager", "Permission denied for stopping advertising", e)
+        } catch (e: Exception) {
+            Log.e("MeshBLEManager", "Failed to stop advertising", e)
         }
+        isAdvertising = false
     }
 
     @SuppressLint("MissingPermission")
-    fun startScanning() {
-        Log.d("MeshBLEManager", "Requesting to start scanning. isScanning: $isScanning")
-        if (isScanning) return
+    fun startScanning(lowPower: Boolean = false) {
+        if (isScanning && currentScanLowPower == lowPower) return
+        Log.d("MeshBLEManager", "Starting scanning. lowPower: $lowPower")
+        
+        if (isScanning) {
+            stopScanning() 
+        }
 
-        // Permission check
+        // ... (permission checks)
         if (!PermissionUtils.hasPermission(context, Manifest.permission.BLUETOOTH_SCAN)) {
             Log.e("MeshBLEManager", "Missing BLUETOOTH_SCAN permission")
             return
@@ -88,38 +100,49 @@ class MeshBLEManager(
             return
         }
 
-        // Relaxing filter: Some devices don't match 128-bit UUIDs in the hardware filter correctly
-        val filter = ScanFilter.Builder().build()
-
-        val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+        // Hardware filtering: Only wake the CPU for MeshTalk service data
+        val filter = ScanFilter.Builder()
+            .setServiceUuid(ParcelUuid(MeshConstants.SERVICE_UUID))
             .build()
+
+        val settingsBuilder = ScanSettings.Builder()
+            .setScanMode(if (lowPower) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_BALANCED)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .setMatchMode(ScanSettings.MATCH_MODE_STICKY)
+
+        // Use hardware batching if available (report results every 5 seconds) to save power
+        if (bluetoothAdapter.isOffloadedScanBatchingSupported) {
+            settingsBuilder.setReportDelay(5000)
+        }
+
+        val settings = settingsBuilder.build()
 
         try {
             scanner.startScan(listOf(filter), settings, scanCallback)
             isScanning = true
-        } catch (e: SecurityException) {
-            Log.e("MeshBLEManager", "Permission denied for scanning", e)
+            currentScanLowPower = lowPower
+        } catch (e: Exception) {
+            Log.e("MeshBLEManager", "Failed to start scan", e)
         }
     }
 
+    @SuppressLint("MissingPermission")
     fun stopScanning() {
         Log.d("MeshBLEManager", "Stopping scanning")
         if (!isScanning) return
         try {
             bluetoothAdapter.bluetoothLeScanner?.stopScan(scanCallback)
-            isScanning = false
-        } catch (e: SecurityException) {
-            Log.e("MeshBLEManager", "Permission denied for stopping scanning", e)
+        } catch (e: Exception) {
+            Log.e("MeshBLEManager", "Failed to stop scan", e)
         }
+        isScanning = false
     }
 
     fun updateAdvertisingId(newId: ByteArray) {
         myShortId = newId
         if (isAdvertising) {
-            stopAdvertising()
-            startAdvertising()
+            // Restart with the current power mode
+            startAdvertising(lowPower = currentAdsLowPower ?: true)
         }
     }
 
@@ -136,6 +159,15 @@ class MeshBLEManager(
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
+            processScanResult(result)
+        }
+
+        override fun onBatchScanResults(results: MutableList<ScanResult>) {
+            Log.d("MeshBLEManager", "Received ${results.size} batched scan results")
+            results.forEach { processScanResult(it) }
+        }
+
+        private fun processScanResult(result: ScanResult) {
             val scanRecord = result.scanRecord ?: return
             val serviceUuid = ParcelUuid(MeshConstants.SERVICE_UUID)
             val uuids = scanRecord.serviceUuids ?: emptyList()

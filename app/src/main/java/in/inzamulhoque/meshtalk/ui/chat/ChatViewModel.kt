@@ -38,10 +38,23 @@ class ChatViewModel(
 
     init {
         meshNetworkManager.connectToPeerById(peerId)
+        (application as? `in`.inzamulhoque.meshtalk.MeshApplication)?.currentChatPeerId = peerId
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        (getApplication() as? `in`.inzamulhoque.meshtalk.MeshApplication)?.currentChatPeerId = null
     }
 
     val peer: StateFlow<Peer?> = peerDao.getPeerFlowById(peerId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val isOnline: StateFlow<Boolean> = meshNetworkManager.connectedPeerAddresses
+        .map { addresses ->
+            val p = peerDao.getPeerById(peerId)
+            p?.deviceAddress?.let { addresses.contains(it) } ?: false
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), initialValue = false)
 
     val messages: StateFlow<List<Message>> = (if (peerId == MeshProtocol.PUBLIC_GROUP_ID) {
         messageDao.getMessagesForGroup(peerId)
@@ -52,7 +65,7 @@ class ChatViewModel(
             val isPublic = peerId == MeshProtocol.PUBLIC_GROUP_ID
             val unread = list.filter { 
                 val isIncoming = if (isPublic) it.senderId != myId else it.receiverId == myId
-                isIncoming && it.status != MessageStatus.READ 
+                isIncoming && (it.status != MessageStatus.READ)
             }
             
             if (unread.isNotEmpty()) {
@@ -118,10 +131,11 @@ class ChatViewModel(
                 status = MessageStatus.PENDING, // Start as PENDING
                 type = MessageType.TEXT
             )
-            val msgId = messageDao.insertMessage(message)
-            val savedMsg = message.copy(id = msgId)
             
-            meshNetworkManager.broadcastMessage(savedMsg)
+            meshNetworkManager.onActivityDetected() // UI interaction resets stationary timer
+            
+            val msgId = messageDao.insertMessage(message)
+            meshNetworkManager.broadcastMessage(message.copy(id = msgId))
         }
     }
 
@@ -162,7 +176,7 @@ class ChatViewModel(
             val originalBitmap = BitmapFactory.decodeStream(inputStream)
             
             // Resize for mesh transport (max 400px width/height)
-            val ratio = Math.min(400.0 / originalBitmap.width, 400.0 / originalBitmap.height).coerceAtMost(1.0)
+            val ratio = kotlin.math.min(400.0 / originalBitmap.width, 400.0 / originalBitmap.height).coerceAtMost(1.0)
             val resized = if (ratio < 1.0) {
                 Bitmap.createScaledBitmap(
                     originalBitmap,
@@ -223,6 +237,25 @@ class ChatViewModel(
             val p = peerDao.getPeerById(peerId)
             if (p != null) {
                 peerDao.updatePeer(p.copy(isVerified = true))
+            }
+        }
+    }
+
+    fun reconnect() {
+        meshNetworkManager.connectToPeerById(peerId)
+    }
+
+    fun formatLastSeen(timestamp: Long): String {
+        val now = System.currentTimeMillis()
+        val diff = now - timestamp
+        
+        return when {
+            diff < 60000 -> "Just now"
+            diff < 3600000 -> "${diff / 60000}m ago"
+            diff < 86400000 -> "${diff / 3600000}h ago"
+            else -> {
+                val sdf = java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault())
+                sdf.format(java.util.Date(timestamp))
             }
         }
     }

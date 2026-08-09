@@ -15,6 +15,8 @@ message ProtoMessage {
   int64 expiry_timestamp = 7;
   int32 hop_count = 8;
   bool is_encrypted = 9;
+  uint64 pow_nonce = 10;
+  int32 type = 11;
 }
 
 message ProtoHandshake {
